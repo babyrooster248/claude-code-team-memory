@@ -1,0 +1,30 @@
+# The endpoint's working directory: notes as they arrive, plus the event log. This is a queue,
+# not a record — the knowledge that survives ends up in the committed artifact, and the original
+# note stays in the member's own memory directory either way.
+inbox/
+inbox-*/
+
+# The aggregator writes its suggestion beside the artifact and never over it. Only the artifact
+# is committed; the proposal is scratch.
+*.proposed
+
+# Eval and test output. Numbers belong in docs/findings.md, where they carry the reasoning that
+# makes them mean something — a bare JSON dump of the last run does not.
+eval/last-run.json
+eval/*.txt
+
+# Scratch directories the test suites create next to the code when run outside a temp dir.
+demo-repo*/
+inbox-e*/
+store[0-9]/
+preftest/
+promo/
+
+*.log
+node_modules/
+.DS_Store
+Thumbs.db
+
+# Deliberately NOT ignored:
+#   AGENTS.md     — the artifact itself, the whole point
+#   rejected.md   — a reviewer's decisions; losing it means every rejected fact comes back

@@ -1,0 +1,49 @@
+{
+  "_comment": "Commit this into the project's .claude/settings.json. A member who clones the repo is participating immediately: nothing to install, no credential to create, no command to remember. Paths below assume the two hook scripts are vendored into the repo at hooks/.",
+
+  "_one_source_of_truth": "autoMemoryDirectory is the only place the notes' location is written. The hook reads this same key rather than taking a path of its own, because a second copy of the path is a second thing to get wrong — and getting it wrong leaves the pipeline dead with every log line clean. Any path works; it does not need to be called 'memory'.",
+
+  "autoMemoryDirectory": "~/agent-knowledge/catalog-svc",
+
+  "env": {
+    "AGENT_KNOWLEDGE_INGEST": "http://aggregator.internal:8791"
+  },
+
+  "_two_runtimes": "Both hooks are registered on purpose and no detection logic is needed. Claude Code never runs on Node — even the npm package only downloads a native binary — so node is not implied on any platform; and a POSIX shell is not implied either, since native Windows without Git for Windows has none. A hook whose runtime is missing fails silently without blocking the other one (measured), and on a machine that can run both, the endpoint's dedupe collapses the duplicate (also measured). hooks/parity-test.js asserts the two send byte-identical notes.",
+
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          { "type": "command", "command": "sh hooks/post-note.sh" },
+          { "type": "command", "command": "node hooks/post-note.js" }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "sh hooks/flush-spool.sh" },
+          { "type": "command", "command": "node hooks/flush-spool.js" }
+        ]
+      }
+    ]
+  },
+
+  "_notes": {
+    "why_posttooluse": "It fires on the write itself. SessionEnd is capped at 1.5s, is killed at teardown, and does not fire on /clear, on a crash, or on Ctrl-C — so anything hung off the end of a session loses notes depending on how the session happened to finish.",
+    "why_http_not_git": "Pushing needs a credential that happens to be present and unexpired on that laptop. Both git transports were built and measured and both worked, and both were rejected for exactly that reason.",
+    "cost": "The hook adds roughly 160ms to a write inside the memory directory, and about 100ms of node startup to every other Write or Edit, where it exits after one string comparison.",
+    "identity": "Attribution comes from the Claude account in ~/.claude.json — accountUuid as the counting key, email as a readable label. That account is always present, because the agent could not have written the note without it, while `git config user.email` is often unset on a fresh machine and is sometimes a shared CI address; git is kept only for the case where the account file cannot be read. Mixing the two sources is the real hazard: one person keyed two ways counts as two people and promotes entries on their own, so the endpoint warns when one label shows up under two keys. A note that cannot be attributed at all is never sent.",
+    "_optional_telemetry": {
+      "_why": "Not on the critical path — the pipeline runs without any of it. Telemetry answers the one question the notes cannot: did a session run and produce nothing at all, which is the only way to see the CLAUDE.md instruction quietly stopping to work. None of these expose content; OTEL_LOG_TOOL_DETAILS is deliberately absent.",
+      "env": {
+        "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+        "OTEL_METRICS_EXPORTER": "otlp",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector.internal:4318"
+      }
+    }
+  }
+}

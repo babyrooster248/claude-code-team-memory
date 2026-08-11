@@ -1,0 +1,9 @@
+# Everything is stored and checked out with LF endings.
+#
+# This is not a style preference. `hooks/post-note.sh` and `hooks/flush-spool.sh` are the reason
+# this project runs on a machine with no Node, and a CRLF checkout breaks them outright: the
+# shell reads `#!/bin/sh\r` and reports `bad interpreter`. The cross-platform behaviour was
+# measured on Ubuntu and Alpine, and a line-ending conversion would quietly undo it for anyone
+# who cloned from Windows.
+* text=auto eol=lf
+*.sh text eol=lf
