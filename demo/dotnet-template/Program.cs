@@ -53,10 +53,6 @@ void Seed()
     }
     catch (SqliteException)
     {
-        // Wrapping the exception and blaming configuration is what a great many real applications do,
-        // and it is why this trap costs an afternoon: the message sends you to appsettings.json and to
-        // file permissions, when the actual cause is that no migration has ever been applied to this
-        // database. The original exception is not even printed.
         Console.Error.WriteLine("Seed failed: could not read the catalog store.");
         Console.Error.WriteLine("Check ConnectionStrings:Catalog in appsettings.json, and that the");
         Console.Error.WriteLine("data directory is writable by the current user.");
@@ -68,9 +64,6 @@ void Report()
 {
     using var db = new CatalogContext();
 
-    // Ordering a decimal column in SQL on SQLite. EF Core maps decimal to TEXT there, so this sorts
-    // lexicographically: "100.00" lands before "42.00" and "9.50" lands last. Nothing errors, and each
-    // number on screen is individually correct — only their order is wrong.
     var rows = db.Items
         .Include(i => i.Category)
         .OrderBy(i => i.Price)
@@ -94,11 +87,6 @@ void Update()
 
     using var db = new CatalogContext();
 
-    // AsNoTracking on a write path. It was almost certainly added to a read, and then this method was
-    // copied from that read. The entity comes back detached, so the assignment below changes an object
-    // the context is not watching, SaveChanges has nothing to save, and the command reports success.
-    // No exception, no warning, and the old value stays in the database — the failure is a lie rather
-    // than an error, which is exactly why it survives code review.
     var item = db.Items.AsNoTracking().FirstOrDefault(i => i.Id == id);
     if (item is null)
     {

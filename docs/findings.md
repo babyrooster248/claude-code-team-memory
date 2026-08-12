@@ -980,6 +980,50 @@ Also changed here: **`aggregate.js` defaulted to `--model sonnet`**, the model �
 recall. Every run that forgot the flag risked discarding the note it was called to distil. The default
 is now `opus`.
 
+## 13. A sample project small enough to demo is small enough to read
+
+Three sessions on a purpose-built .NET console app — six source files, EF Core on SQLite — planted
+with three traps. The result is the most useful thing the demo preparation produced, and it is not
+what it was built to show.
+
+| Trap | Warm agent (artifact present) | Cold agent (`AGENTS.md` empty) |
+| --- | --- | --- |
+| ordering: `seed` before `migrate` | ran `migrate` first, never tripped | ran `migrate` first, never tripped |
+| soft delete with no global query filter | found it, cited entry `k1` | **found it unaided**, cited `Program.cs:67` and `CatalogContext.cs:34` |
+
+Both arms reached the same conclusion — four live rows of six — and the cold one got there by reading
+`OnModelCreating`, seeing no `HasQueryFilter`, and reasoning about it. The artifact changed how the
+finding was *phrased*, not whether it was found.
+
+**So two of the three planted traps fail this project's own removal test**, the one in
+`merge-prompt.md`: *a line that a new agent could derive by reading the code, the config, or the
+README fails the test and must be deleted, however true it is.* In six files nothing is hidden. A
+missing `HasQueryFilter` is invisible across a five-hundred-file solution and obvious in a file you
+can read in one screen.
+
+Three things follow, and the third is the uncomfortable one.
+
+**The traps that survive are the ones about things outside the source.** Every real note in
+`eval/cases.jsonl` that is genuinely non-derivable is about the environment or the team's history:
+a vendor feature that is paid and was declined, a branch that auto-deploys with no gate, a lint
+configuration that differs between a laptop and CI, a warning that used to be true and was re-measured.
+None of those can be read out of a console app, and none of them can be *discovered live* by an agent
+either — which is precisely why they have to be captured from the person who hit them.
+
+**A source comment explaining a trap is the same bug as the artifact header.** The first attempt had
+comments in the sample explaining each trap for a human reader. The agent read them and narrated the
+trap before hitting it. That is the second time in one session that a file with two audiences had one
+of them act on words written for the other — the first being `AGENTS.md`'s *"Edit freely"*. Comments
+now live in `demo/traps.md`, which sits in the tool's repository and never enters the project under
+test.
+
+**And the honest framing for any demonstration is the mechanism, not a manufactured advantage.** A
+capable agent on a small clean codebase does not need the artifact for anything the codebase states.
+Claiming otherwise in front of engineers invites exactly the right objection — *my agent would have
+found that too* — and the answer is that it would, here, and would not at the scale the tool exists
+for. Better to show capture, filtering, review and promotion working, and be straight that the sample
+is too small for the knowledge in it to be worth keeping by the project's own rule.
+
 ## Designs that failed
 
 **Mining the transcript for moments something went wrong.** Parse the session transcript at `SessionEnd`,
