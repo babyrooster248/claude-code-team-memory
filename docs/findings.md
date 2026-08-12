@@ -852,6 +852,36 @@ unconditionally, so the same bug existed there in the opposite direction.
 `parity-test.js` could not see any of this because it built native paths. It now runs every case twice
 on Windows, once in each path shape, which is 12 cases rather than 6.
 
+### Re-run after the fixes
+
+The whole thing again, fresh sandbox, fresh credential, one real session. The agent hit the trap and
+wrote `seed-requires-migrate-first.md` unprompted, arriving as `minh@example.com` with `source:
+basic-auth`. Then the five credential paths:
+
+| | Before | Now |
+| --- | --- | --- |
+| wrong `AGENT_KNOWLEDGE_PROJECT` | spooled, retried for ever | **dropped**, log names the file to fix, spool stays at 0 |
+| no credential | spooled | spooled |
+| wrong token | spooled | spooled |
+| flusher against a wrong token | kept | kept |
+| credential fixed, flusher re-run | delivered | delivered |
+
+And all four sender × path-shape combinations delivered, where the `/c/...` shape had previously made
+the node sender exit silently:
+
+```
+native  sh   arrived=1      posix  sh   arrived=1
+native  node arrived=1      posix  node arrived=1
+```
+
+Tallies for the run: 8 accepted, three 401s, one 403, no 429s, one refusal (`MEMORY.md`, correctly).
+The second project's inbox was never created. Final spool: empty.
+
+One operational note that is not about this code but will bite anyone running the host on Windows:
+`pkill -f "ingest.js --config"` matches nothing there, so a server believed stopped keeps holding the
+port and the next start dies with `EADDRINUSE`. `Get-NetTCPConnection -LocalPort <port> -State Listen`
+piped into `Stop-Process` is what actually works.
+
 ## Designs that failed
 
 **Mining the transcript for moments something went wrong.** Parse the session transcript at `SessionEnd`,
