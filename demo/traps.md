@@ -1,72 +1,99 @@
-# What is planted in the sample project, and why
+# What knowledge the demo carries, and why a model cannot infer it
 
-For whoever is presenting: this is how you know a beat actually happened rather than nearly happened.
+For whoever is presenting. Everything here was run before it was written down, including the two
+things that did not work.
 
-The stack is a .NET 10 console app on EF Core 10 + SQLite. .NET because the audience is a .NET team
-and a trap they recognise is worth more than a trap that is merely true; SQLite because it is real EF
-Core with real migrations and **no database server and no Docker** — the two things most likely to
-fail in a meeting room. Migrations are applied in code with `Database.Migrate()`, so nobody needs the
-`dotnet-ef` tool installed to take part.
+## The rule this file exists to respect
 
-Everything below was run before it was written down. Two candidate traps were **dropped** for failing
-to reproduce, which is recorded at the bottom because "we tried it and it did not happen" is the part
-usually left out.
+`merge-prompt.md` applies one test to every line of the artifact:
 
-## The three that are in
+> Remove the line. Would a new agent now do the wrong thing?
 
-| | What the developer sees | What is actually wrong | Where it is used |
-| --- | --- | --- | --- |
-| **T1** | `dotnet run -- seed` prints *"could not read the catalog store. Check ConnectionStrings:Catalog in appsettings.json, and that the data directory is writable"* | No migration has ever been applied. The seeder catches `SqliteException` and blames configuration, so you go and read `appsettings.json` and check file permissions | **Act 1**, live, on the presenter's machine |
-| **T2** | `dotnet run -- update 1 "New label"` prints *`updated item 1 to "New label"`* and exits 0 | `AsNoTracking()` on a write path. The entity comes back detached, `SaveChanges()` has nothing to save, and the old value stays in the database. **No exception, no warning** | **Act 5**, live, on the colleague's machine |
-| **T3** | `dotnet run -- report` returns six rows | Three of them are soft-deleted — one item and a whole category. There is no `HasQueryFilter`, so every query has to remember `IsDeleted` by hand, and nothing fails when it does not | Pre-seeded `AGENTS.md` entry, not a live act |
+A line an agent can derive by reading the code fails that test. The first version of this demo ignored
+it and planted three technical traps in the sample project. Measured over three sessions, **a capable
+agent found them unaided**: it read `OnModelCreating`, saw no `HasQueryFilter`, and worked out that
+four of six rows were live — the same conclusion an agent holding the artifact reached. In six source
+files nothing is hidden.
 
-**T1 is the visible one.** It fails immediately, the message is confidently wrong, and recovering from
-it is one command. That makes it the right opening: the audience sees the agent get misled, work it
-out, and write it down.
+So the demo does not pretend the artifact helps with anything the codebase states. It carries the
+knowledge that is genuinely unavailable to a model: **who consumes the output, and what happened the
+last time somebody got it wrong.**
 
-**T2 is the better trap and the worse demo.** A command that reports success and does nothing is the
-kind of bug that survives review, and the agent only finds it by *verifying* rather than trusting the
-output. Give the task as "rename item 1 and confirm it took effect" — a natural instruction, not a
-hint. If the agent does not verify, it will report success too, and that is worth saying out loud:
-it is the same failure the code has, one level up.
+## The knowledge
 
-**T3 never fires.** Nothing breaks; the wrong rows just come back. That is exactly why it belongs in
-the artifact rather than on stage — an invisible failure makes a poor live beat and a valuable note.
+**The finance team opens the exported CSV in Excel under a vi-VN locale.**
 
-## What a captured note should contain
+| | |
+| --- | --- |
+| What an agent writes unprompted | `InvariantCulture`, `,` delimiter, `.` decimals. Reading the code, this is the correct answer |
+| What the project needs | `;` delimiter, `,` decimals from a pinned `vi-VN` culture, UTF-8 **with** BOM, quoting keyed on `;` |
+| Why no model can know | It depends on which application opens the file, in which locale, and on the fact that a previous wrong send cost a full redo of the monthly report |
+| How it fails | Silently, and only on the recipient's machine. `42.00` arrives in vi-VN Excel as text, and `SUM()` returns 0. The file looks perfect in a terminal |
 
-If the note does not name the string somebody would paste into a search box, the beat only half
-happened. For T1 that is the phrase from the misleading message plus the real cause. For T2 it is
-`AsNoTracking` and the word "silently". A note that says "run migrate first" and nothing else has
-recorded the fix without recording the symptom, so the next person still loses the afternoon.
+Nothing about that is in the repository. It is in the tech lead's head, and it gets re-explained to
+every new joiner — which is the entire argument for the tool, stated in one example the room will
+recognise.
 
-## The two that were dropped
+## How it gets captured: a correction, not a discovery
 
-**Decimal ordering on SQLite.** EF Core maps `decimal` to a TEXT column, and text sorts
-lexicographically, so `ORDER BY Price` should have put `100.00` before `42.00`. It does not. Two
-attempts produced correctly ordered output; logging the generated SQL showed why — EF Core 10 emits
-`ORDER BY "Price" COLLATE EF_DECIMAL`, a collation the provider registers for exactly this case. The
-first attempt failed for a second reason worth knowing: an explicit `HasColumnType("decimal(18,2)")`
-gives the column NUMERIC affinity under SQLite's type rules, which sorts numerically anyway. So the
-trap was fixed twice over, once by the library and once by accident.
+Project knowledge does not arrive by an agent tripping over it. It arrives when a person says *"no,
+not like that, and here is why"*. That is one of the triggers the `CLAUDE.md` instruction names, and
+it is the one the demo exercises.
+
+Turn 1 — the agent does the reasonable thing:
+
+```
+Thêm lệnh export để xuất report ra file CSV, tôi cần gửi cho bên tài chính.
+```
+
+Turn 2 — the correction, which is the whole demo in one sentence:
+
+```
+Sai rồi. Bên tài chính mở file bằng Excel locale vi-VN nên dấu phẩy làm vỡ cột hết, phải dùng
+dấu chấm phẩy. Lần trước gửi sai đã phải làm lại toàn bộ báo cáo tháng. Sửa lại đi.
+```
+
+**Verified.** The agent fixed the delimiter, went further and fixed the decimal separator too, and
+wrote two notes without being asked — one about this export, one a general lesson about not defaulting
+to invariant for files a person opens.
+
+## What the sample project still provides
+
+The .NET console app is no longer where the knowledge lives, but it still has to be a real project
+with real failures, or there is nothing to work on. Three remain, and their role has changed:
+
+| | Behaviour | Role now |
+| --- | --- | --- |
+| `seed` before `migrate` | Fails with *"could not read the catalog store. Check ConnectionStrings:Catalog"* — a caught exception blaming configuration | Background realism. **Do not build a beat on it**: agents ran `migrate` first in every session observed |
+| `update <id> <label>` | Prints success, writes nothing. `AsNoTracking()` on a write path | Found unaided by agents, twice, incidentally. Useful as an *entry* the artifact carries, not as a live surprise |
+| `report` | Returns soft-deleted rows; no `HasQueryFilter` anywhere | Same. Found unaided in both arms |
+
+The agent that had the artifact used the `update` entry to avoid setting up test data with a command
+it knew to be broken. That is the artifact earning its place on a technical entry — not by revealing
+the bug, but by saving the time it takes to rediscover it.
+
+## The two candidates that were dropped
+
+**Decimal ordering on SQLite.** EF Core maps `decimal` to TEXT, and text sorts lexicographically, so
+`ORDER BY Price` should have put `100.00` before `42.00`. It does not. Logging the generated SQL showed
+EF Core 10 emitting `ORDER BY "Price" COLLATE EF_DECIMAL`, a collation the provider registers for
+exactly this case. A first attempt had also failed for a second reason: an explicit
+`HasColumnType("decimal(18,2)")` gives NUMERIC affinity under SQLite's type rules and sorts numerically
+anyway. Fixed twice over, once by the library and once by accident.
+
+It survives as a **deliberately stale entry** in the pre-seeded artifact, so a session can exercise the
+one capture trigger nothing else does — finding that an existing note is now wrong — and so the demo
+has something honest to say about the problem this project cannot solve.
 
 **`dotnet ef` writing to a different database than the app.** Modelled on a real note about a
-containerised app, where the tool on the host and the app in the container genuinely disagree about
-the connection string. Here they agree: `AppContext.BaseDirectory` resolves to the same build output
-directory at design time and at run time, and `dotnet ef database update` touched the same file the
-app uses. Reproducing it would have meant contriving a split that this project does not have, and a
-contrived trap teaches the audience to discount the ones that are real.
+containerised app where host tool and container app genuinely disagree. Here they agree:
+`AppContext.BaseDirectory` resolves to the same output directory at design time and run time. Contriving
+a split would teach the audience to discount the traps that are real.
 
-Both are recorded rather than quietly removed, because a demo built on traps that "should" fire is a
-demo that finds out in front of an audience.
+## One detail that keeps the sample honest
 
-## One detail that makes T1 work
-
-The failure message tells you to check `ConnectionStrings:Catalog` in `appsettings.json`. That file
-**exists**, is copied to the output, holds a plausible connection string — and nothing reads it:
-`CatalogContext` hard-codes its own. If the file were missing, the agent would know within seconds
-that the message was fabricated and the trap would collapse. Because it is there and looks right, the
-message costs real time, which is the whole point.
-
-Configuration the code quietly ignores is also one of the more common things a newcomer loses an hour
-to, so this detail is not only stagecraft.
+**No comment in the sample source explains any of this.** The first version had them, written for a
+human reading the repository, and the agent read them and narrated the trap before hitting it — the
+same mistake as the artifact header that used to say *"Edit freely"* and was read by agents as
+permission. A file with two audiences will have one of them act on words written for the other. All
+explanation lives here, in the tool's repository, never inside the project under test.

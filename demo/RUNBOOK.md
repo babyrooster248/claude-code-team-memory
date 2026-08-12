@@ -19,31 +19,41 @@ comes out monolingual English, because the file is read by everyone who will eve
 | .NET | `dotnet --version` on both machines. The host needs none |
 | Fresh state | `node demo/setup-project.js --dest <path> --stack dotnet --seeded --ingest https://<host> --project catalog-svc` |
 
-## Act 1 — the trap, live (5')
+## Act 1 — the correction, live (6')
 
-Prompt, typed into a fresh Claude Code session in the project directory:
+The knowledge the demo carries is not in the code, so it cannot be discovered — it has to arrive from
+a person. That is what this act is: the tech lead says one sentence he has said to every new joiner,
+and it is captured without anyone asking for it.
+
+**Turn 1**, in a fresh Claude Code session in the project directory:
 
 ```
-Nạp dữ liệu mẫu cho catalog rồi cho tôi xem report.
+Thêm lệnh export để xuất report ra file CSV, tôi cần gửi cho bên tài chính.
 ```
 
-Nothing about memory, notes, migrations, or ordering. The task is an outcome — data loaded, report
-visible — and `seed` is the obvious first move, which is what walks into T1.
+The agent writes it with `InvariantCulture`, a `,` delimiter and `.` decimals. **Say out loud that
+this is the correct answer from reading the code** — it matters that the audience sees the agent do
+something reasonable rather than something stupid.
 
-**Beat landed if:** the agent runs `dotnet run -- seed` first, gets *"Seed failed: could not read the
-catalog store. Check ConnectionStrings:Catalog in appsettings.json"*, works out that no migration has
-been applied, recovers, and writes a note naming both the misleading message and the real cause.
+**Turn 2** — the correction:
 
-**Verification state: UNVERIFIED, and the first attempt failed for two reasons now fixed.** The agent
-ran `migrate` first and explained the trap before hitting it, because (a) the sample source carried
-comments explaining every trap, and (b) the pre-seeded artifact contained an entry saying migrations
-are applied in code. Both are gone — the source now has zero comments and the artifact says nothing
-about ordering — but the corrected setup has not yet met a live session.
+```
+Sai rồi. Bên tài chính mở file bằng Excel locale vi-VN nên dấu phẩy làm vỡ cột hết, phải dùng
+dấu chấm phẩy. Lần trước gửi sai đã phải làm lại toàn bộ báo cáo tháng. Sửa lại đi.
+```
 
-**If the agent runs `migrate` first anyway:** say so plainly. It is the honest half of the same point:
-a capable agent sometimes reads the README carefully and gets it right, and the note only exists
-because sometimes it does not. Then move to act 2 — nothing downstream depends on the trap firing,
-only on a note existing.
+**Beat landed if:** the agent fixes the delimiter and writes a note. **Verified**, and it did more
+than asked — it also changed the decimal separator, because vi-VN Excel reads `42.00` as text, and it
+wrote two notes: one about this export, one a general lesson about not defaulting to invariant for a
+file a person opens.
+
+Read the note out. The line that matters is the one no model could have produced:
+
+> *"a previous wrong send cost them a full redo of the monthly report. None of these failures are
+> visible locally — the file looks fine in a terminal."*
+
+**The point to land:** how many times has someone in this room explained that to a new joiner? It was
+captured once, by nobody doing anything extra.
 
 ## Act 2 — transport (2')
 
@@ -100,46 +110,29 @@ reviewer's own copy of this beat has not been rehearsed.
 
 ## Act 5 — the colleague's machine (6')
 
-### 5a — the same task, a different person
+### 5a — a different task, a person who was never told (4')
 
-They `git pull`, then the **same prompt as act 1**:
+They `git pull`, then a task that is **not** the one from act 1:
 
 ```
-Nạp dữ liệu mẫu cho catalog rồi cho tôi xem report.
+Thêm lệnh export-categories để xuất danh sách category ra CSV gửi bên tài chính.
 ```
 
-Two transcripts side by side: act 1 feeling its way through the trap, this one going straight.
+**Beat landed if:** without being told anything, the agent uses `;`, vi-VN decimals with the culture
+pinned rather than `CurrentCulture`, UTF-8 with BOM, and quoting keyed on `;`.
 
-**Measured, on the node version of this project:** cold tripped **3/3**, warm went straight **2/3**.
-So there is roughly a one-in-three chance this agent trips anyway. If it does: *"reading is not acting
-— without the file it went wrong three times out of three, with it two out of three, and this is the
-third"*, then point at how much faster it recovered. Measured, not improvised.
+**Verified.** On a fresh checkout with no memory and no export code, it did all of that — and verified
+the output with a hexdump rather than by eye, **because the entry says the file always looks fine in a
+terminal**. It also used the other entry to avoid setting up test data with the `update` command it
+knew to be silently broken.
 
-Do **not** show the cost table. It is in `docs/findings.md` §11 for anyone who asks, and an audience
+That is the claim of the whole project in one screen: a correction someone made once, applied
+correctly by a different person's agent, on a task nobody had done before.
+
+Do **not** show the cost table. `docs/findings.md` §11 has it for anyone who asks, and an audience
 does not pay attention to a table proving something they already believe.
 
-### 5b — the trap that lies
-
-```
-Đổi tên item 1 thành "Áo thun trơn" và xác nhận là nó đã đổi thật.
-```
-
-The second clause is deliberate and worth defending if challenged: asking for confirmation of a data
-change is what any lead would write, and without it the agent has no reason to look. T2 prints
-`updated item 1 to "Áo thun trơn"` and changes nothing, so the beat depends on the agent verifying
-rather than trusting the output.
-
-**Beat landed if:** the agent runs `report`, sees the old label, and works out that `AsNoTracking()` on
-a write path means `SaveChanges()` had nothing to save.
-
-**If the agent reports success without verifying:** that is the same failure the code has, one level
-up, and saying so is stronger than hiding it — the entire argument for a human gate is that neither
-the code nor the agent verifies itself.
-
-**Verification state: UNVERIFIED live.** T2 itself is verified deterministically — `update` reports
-success and the label does not change — but no session has yet been given this prompt.
-
-### 5c — the loop closes
+### 5b — the loop closes
 
 Their note reaches the host and the trigger runs again. That run does three things at once:
 

@@ -1024,6 +1024,54 @@ found that too* — and the answer is that it would, here, and would not at the 
 for. Better to show capture, filtering, review and promotion working, and be straight that the sample
 is too small for the knowledge in it to be worth keeping by the project's own rule.
 
+## 14. The knowledge worth carrying is the knowledge a model cannot infer
+
+§13 established that planted technical traps do not survive in a small sample: a capable agent reads
+six files and finds them unaided. The follow-up question was what *does* survive, and the answer is
+sharp enough to have changed what the demo shows.
+
+**Nothing in the source. Everything about who consumes the output, and what happened last time.**
+
+The test used a correction rather than a trap, because project knowledge does not arrive by discovery
+— it arrives from a person. Two scripted turns:
+
+1. *"Add an export command, I need to send the report to the finance team."* The agent wrote CSV with
+   `InvariantCulture`, a `,` delimiter and `.` decimals, reasoning that invariant is the safe default.
+   Reading the code, that is the correct answer.
+2. *"Wrong. Finance opens it in Excel under a vi-VN locale, so the comma breaks every column. Use
+   semicolons. Last time we sent it wrong we had to redo the entire monthly report."*
+
+The agent corrected the delimiter, and went further than the instruction — it also switched the
+decimal separator, because vi-VN Excel reads `42.00` as text. Then it wrote two notes unprompted: one
+project-specific, one a general lesson about defaulting to invariant. The project one carried the part
+no model can derive:
+
+> *"vi-VN Excel reads `.` as a thousands separator, so `42.00` does not come back as 42; it lands as
+> text and `SUM()` returns 0. … The user corrected it: a previous wrong send cost them a full redo of
+> the monthly report. None of these failures are visible locally — the file looks fine in a terminal."*
+
+The aggregator then did three things right on real input: **kept** the four durable notes, **dropped**
+one as machine-local — *"missing local sqlite3 CLI is a per-machine tooling workaround"*, which the
+session had produced organically rather than for the test — and **merged** the specific and general
+locale notes into one entry, noting they came from the same contributor so the count did not move.
+
+### The transfer, verified
+
+A fresh checkout, no memory, no export code, the distilled entry in `AGENTS.md`, and a *different*
+task: export the categories. Without being told anything, the agent used `;`, vi-VN decimals with the
+culture pinned rather than `CurrentCulture`, UTF-8 with BOM, and quoting keyed on `;` — and verified
+the result with a hexdump rather than by eye, **because the entry said the file always looks fine in a
+terminal**. It also used the other entry to avoid setting up test data with a command it knew to be
+silently broken.
+
+That is the whole claim of the project, demonstrated on knowledge that could not have been guessed:
+a person's correction, captured once, applied correctly by someone else's agent on a different task.
+
+It also produced a small honest wart. The entry describes `dotnet run -- export` as existing, and in
+a fresh checkout it does not — the agent noticed and said so, treating the entry as a specification
+instead. In real use the command would exist, because the session that wrote the note created it. But
+it is the same staleness problem this project still cannot solve, arriving from a third direction.
+
 ## Designs that failed
 
 **Mining the transcript for moments something went wrong.** Parse the session transcript at `SessionEnd`,
