@@ -778,6 +778,53 @@ being the most load-bearing: measuring the filter is nearly free, and measuring 
 Anyone repeating this should size the batch against a spend limit first, run the arms sequentially,
 and treat 10 sessions per arm as a real budget decision rather than a default.
 
+## 10. The authenticated pipeline, run end to end
+
+One real Claude Code session against a real `ingest.js --config`, with a credential issued by
+`make-credential.js` and a project set up the way a member's clone would be. The session was given
+ordinary work — "get the seed data loaded" — with no mention of memory, notes, or authentication.
+
+It hit the planted trap, worked out that `SQLITE_CONSTRAINT: FOREIGN KEY constraint failed` really
+meant the migration had not run, and wrote `seed-fk-error-means-unmigrated.md` unprompted. What
+arrived at the endpoint:
+
+```json
+{"user":"minh@example.com","label":"minh@example.com","source":"basic-auth",
+ "claimed":"75db929b-c55d-4207-9c82-6bf32074f4ba", ...}
+```
+
+`user` is the authenticated email; the Claude account the sender reported is kept as `claimed` and is
+not what the promotion rule counts. That is the whole point of binding identity to the credential,
+and this is it working on a real session rather than in a fixture. Both hooks fired and the dedupe
+collapsed them to one contributor. The `storefront` inbox was never created — a member writing only
+to the project they are on.
+
+The four credential paths, exercised by invoking the hooks directly:
+
+| | Result |
+| --- | --- |
+| no credential file | spooled, log names the file to copy |
+| the spooled `.head` | contains no credential — grep for `authorization`/`basic`/`token` is clean |
+| wrong token | 401 → **spooled, not dropped** |
+| flusher against a wrong token | both entries **kept**, spool not burned |
+| credential fixed, flusher re-run | both delivered; inbox holds both notes |
+
+The shell sender authenticates identically, which matters because it is the path on a machine with no
+node. A note sent with the wrong `AGENT_KNOWLEDGE_PROJECT` is refused and spooled.
+
+Two things this run exposed:
+
+- **A permanently wrong project id means a permanently growing spool.** 401 is ambiguous between "a
+  credential that will be fixed" and "a project id that never will be", and both are retried, because
+  the alternative discards knowledge. `MAX_PER_RUN` caps the noise per session but nothing caps the
+  spool's size or age. Known, not fixed.
+- **The node hook does not fold `/c/`-style paths and the shell hook does.** Found by writing a test
+  harness that passed Git Bash's `$PWD` into the node hook: it resolved `/c/Users/...` to
+  `C:\c\Users\...`, matched no memory root, and exited silently — the fast path doing exactly what it
+  should with a path it could not recognise. Real Claude Code supplies native paths, so this bites
+  test harnesses rather than members, but the two senders are not equivalent here and
+  `parity-test.js` does not cover it because it builds native paths too.
+
 ## Designs that failed
 
 **Mining the transcript for moments something went wrong.** Parse the session transcript at `SessionEnd`,
