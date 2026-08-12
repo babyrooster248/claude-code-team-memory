@@ -18,6 +18,17 @@
     "catalog-svc": {
       "out": "./inbox/catalog-svc",
 
+      "_aggregate": "Present = the endpoint runs aggregate.js itself when notes arrive. Absent = it only receives notes and aggregate.js stays a manual command. No cron is involved: this process is already resident. quietSeconds is a debounce, and it earns its place because ONE note arrives as TWO accepts (both hooks fire) and a session usually writes several — without it, one session's work becomes four model-spending runs. A note landing mid-run marks exactly one follow-up rather than queueing another, so two runs never race the same clone and branch name. `repo` is a clone of the project holding the artifact; the run does git pull --ff-only first and SKIPS itself if that fails, because merging onto a stale AGENTS.md re-proposes the lines a reviewer just deleted. A clone with no upstream is fine — there is nothing to be stale against. `commit` true needs push access from this host, so use a deploy key scoped to that one repo.",
+      "aggregate": {
+        "repo": "/home/you/clones/catalog-svc",
+        "artifact": "AGENTS.md",
+        "quietSeconds": 120,
+        "model": "opus",
+        "votes": 3,
+        "cap": 50,
+        "commit": true
+      },
+
       "_members": "The allow-list and the credential store are the same map on purpose. A separate list of permitted emails would be a second thing to keep in step, and the failure mode of it drifting is a departed member who can still write. Removing someone is deleting their entry. Generate one with: node aggregator/make-credential.js <email>",
       "members": {
         "minh@example.com": {

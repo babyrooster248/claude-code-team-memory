@@ -11,6 +11,9 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+// spawnSync only for the git pull, which is fast and must complete before the run decides to
+// proceed; spawn for the aggregate run itself, which must not block the endpoint.
+const { spawn, spawnSync } = require('child_process');
 
 const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf('--' + n); return i === -1 ? d : argv[i + 1]; };
@@ -312,7 +315,7 @@ function authenticate(req) {
   const member = project && project.members && project.members[email];
 
   if (project && member && verify(member)) {
-    return { paths: projectPaths(project), email, projectId };
+    return { paths: projectPaths(project), email, projectId, project };
   }
 
   // The credential is good but not for this project. Saying so is safe — the caller has already
@@ -329,6 +332,117 @@ function authenticate(req) {
   // Nothing matched. Hash once more so a wrong email does not answer faster than a wrong token.
   crypto.scryptSync(token || 'x', 'timing', 32);
   return { fail: 'not authorised for this project' };
+}
+
+// ---------------------------------------------------------------- running aggregate by itself
+//
+// The decision this project started from was that distilling happens **when knowledge arrives**, not
+// on a schedule — a weekly cron is the thing that makes a pipeline stop feeling automatic. So the
+// trigger lives here, in the process that is already resident: no cron, no scheduler, no new
+// component. A project with no `aggregate` block in the config never runs anything, which keeps the
+// manual path and every existing test untouched.
+//
+// Three mechanisms, each for something already observed rather than imagined:
+//
+//   debounce      Both hooks fire for one note, so one note is TWO accepts (visible in every
+//                 end-to-end run), and a session often writes several notes in a row. Without a
+//                 quiet window that is three or four model-spending runs for one session's work.
+//   single-flight Two overlapping runs would race the same git clone and the same branch name.
+//   pull first    Merging onto a stale AGENTS.md re-proposes exactly the lines a reviewer just
+//                 deleted. Skipping the run is strictly better than running on old state, so a
+//                 failed pull aborts loudly instead of continuing.
+const AGG_DEFAULTS = { quietSeconds: 120, votes: 3, model: 'opus', cap: 50, artifact: 'AGENTS.md' };
+const aggState = new Map(); // projectId -> { timer, running, dirty }
+
+function aggLog(id, msg) { console.error(`[trigger:${id}] ${msg}`); }
+
+function runAggregate(projectId, project, paths) {
+  const cfg = Object.assign({}, AGG_DEFAULTS, project.aggregate);
+  const st = aggState.get(projectId);
+  st.running = true;
+  st.timer = null;
+
+  // Two different things look like "pull failed" and only one of them should stop the run.
+  //
+  // A clone with no upstream has nothing to be stale against, so pulling is not merely optional
+  // there — it is meaningless, and `git pull` exits non-zero saying so. Treating that as a reason to
+  // abort meant the trigger never fired at all on a local-only artifact repo, which is how the first
+  // version of this failed its own test.
+  const upstream = spawnSync('git',
+    ['-C', cfg.repo, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
+    { encoding: 'utf8' });
+
+  if (upstream.status === 0) {
+    // --ff-only on purpose: a merge commit made unattended in a clone nobody watches is a worse
+    // outcome than a skipped run, and a non-fast-forward here means someone pushed to the artifact,
+    // which is exactly when this must not proceed on what it already had.
+    const pull = spawnSync('git', ['-C', cfg.repo, 'pull', '--ff-only'], { encoding: 'utf8' });
+    if (pull.status !== 0) {
+      aggLog(projectId, `SKIPPED: git pull --ff-only failed in ${cfg.repo} — ` +
+        `${(pull.stderr || pull.stdout || '').trim().split('\n')[0]}. ` +
+        `Refusing to merge onto a stale artifact; fix the clone and the next note will retrigger.`);
+      st.running = false;
+      return;
+    }
+  } else {
+    aggLog(projectId, `no upstream in ${cfg.repo} — local-only clone, nothing to pull`);
+  }
+
+  const script = cfg.script || path.join(__dirname, 'aggregate.js');
+  const args = [
+    script,
+    '--store', path.join(paths.out, 'notes'),
+    '--events', paths.eventsFile,
+    '--artifact', path.join(cfg.repo, cfg.artifact),
+    '--cap', String(cfg.cap),
+    '--votes', String(cfg.votes),
+    '--model', cfg.model,
+  ];
+  if (cfg.commit) args.push('--commit');
+
+  aggLog(projectId, `running: node ${args.slice(1).join(' ')}`);
+  const started = Date.now();
+
+  // spawn, never spawnSync. This process is the HTTP endpoint, and a synchronous run would stop it
+  // answering for however long the model passes take — the hooks of everyone still working would
+  // time out and spool while the aggregator thought about their colleague's note.
+  const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const relay = (buf) => String(buf).split('\n').filter(Boolean)
+    .forEach(l => aggLog(projectId, '  ' + l));
+  child.stdout.on('data', relay);
+  child.stderr.on('data', relay);
+
+  child.on('close', (code) => {
+    aggLog(projectId, `finished in ${Math.round((Date.now() - started) / 1000)}s, exit ${code}`);
+    st.running = false;
+    if (st.dirty) {
+      st.dirty = false;
+      aggLog(projectId, `notes arrived while running — one more pass in ${cfg.quietSeconds}s`);
+      st.timer = setTimeout(() => runAggregate(projectId, project, paths), cfg.quietSeconds * 1000);
+      st.timer.unref?.();
+    }
+  });
+}
+
+function scheduleAggregate(projectId, project, paths) {
+  if (!project || !project.aggregate || !project.aggregate.repo) return;
+  const cfg = Object.assign({}, AGG_DEFAULTS, project.aggregate);
+
+  if (!aggState.has(projectId)) aggState.set(projectId, { timer: null, running: false, dirty: false });
+  const st = aggState.get(projectId);
+
+  if (st.running) {
+    // Do not queue a second run: mark it and let the one in flight decide, or two runs end up on the
+    // same branch name at the same time.
+    if (!st.dirty) aggLog(projectId, 'note arrived while a run is in flight — will re-run once after');
+    st.dirty = true;
+    return;
+  }
+
+  if (st.timer) clearTimeout(st.timer);
+  st.timer = setTimeout(() => runAggregate(projectId, project, paths), cfg.quietSeconds * 1000);
+  st.timer.unref?.();
+  aggLog(projectId, `note accepted — aggregate in ${cfg.quietSeconds}s unless another arrives first`);
 }
 
 http.createServer((req, res) => {
@@ -390,6 +504,10 @@ http.createServer((req, res) => {
                   `${r.bytes} bytes of note, wire body ${raw.length} bytes, ` +
                   `${r.people} contributor(s) so far`);
     send(200, { ok: true, stored: r.local, bytes: r.bytes });
+
+    // After the response, not before: the hook is waiting, and a note that was stored must be
+    // acknowledged whether or not anything downstream is configured to act on it.
+    if (auth.projectId) scheduleAggregate(auth.projectId, auth.project, auth.paths);
   });
 }).listen(port, bind, () => console.error(
   `[ingest] listening on ${bind}:${port} — ` +

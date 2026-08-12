@@ -944,6 +944,42 @@ than no marker. `aggregator/artifact-check-test.js` covers it in 11 cases, and c
 version of that pattern letting `(2 people, confirmed)` through because it required the closing
 bracket immediately after the noun.
 
+## 12. The aggregator now starts itself, and the scheduling is where the bugs were
+
+`aggregate.js` was a command somebody had to type, which contradicted the decision this project
+started from — **not on a schedule, but when knowledge arrives after a session** — and contradicted
+the README's own "no cron, no scheduler". Typing it by hand is a schedule with a human as the timer.
+
+The trigger went into `ingest.js` rather than into cron, because that process is already resident: no
+new component, and the "no scheduler" claim stays true. Three mechanisms, each for something already
+observed rather than imagined:
+
+| | Why it exists |
+| --- | --- |
+| **Debounce** (`quietSeconds`) | One note arrives as **two accepts**, because both hooks fire — visible in every end-to-end run — and a session usually writes several notes. Without a quiet window, one session's work is four model-spending runs |
+| **Single-flight** | Two overlapping runs would race one git clone and one branch name. A note landing mid-run marks exactly one follow-up instead of queueing another |
+| **`git pull --ff-only` first** | Merging onto a stale artifact re-proposes the lines a reviewer just deleted. A failed pull **aborts the run**, loudly: not running is strictly better than running on old state |
+
+Two things the tests caught that a demo would have caught in public instead:
+
+- **`git pull` fails on a repo with no upstream**, and the first version treated every pull failure as
+  "stale, do not run" — so on a local-only artifact repo the trigger never fired at all. A clone with
+  no upstream has nothing to be stale against. The two cases are now distinguished, and only a real
+  fetch failure aborts.
+- **The test's own broken-clone fixture was testing the wrong thing.** Pointing a fresh repo at an
+  unreachable URL leaves `@{u}` unresolvable, so the code read it as local-only and proceeded, and the
+  case passed for the wrong reason. It now clones a real bare remote, pushes once so `origin/main`
+  exists locally, and only then breaks the URL — upstream resolves, fetch cannot.
+
+`aggregator/trigger-test.js` covers twelve cases with the aggregate script stubbed, so it runs in the
+ordinary suite with no model calls: one note via two hooks is one run, three notes in a session is one
+run, two notes during a run is one follow-up rather than two, a pull failure skips and says why, and a
+project with no `aggregate` block never runs anything.
+
+Also changed here: **`aggregate.js` defaulted to `--model sonnet`**, the model §3 measured at 50%
+recall. Every run that forgot the flag risked discarding the note it was called to distil. The default
+is now `opus`.
+
 ## Designs that failed
 
 **Mining the transcript for moments something went wrong.** Parse the session transcript at `SessionEnd`,

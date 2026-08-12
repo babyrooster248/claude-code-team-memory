@@ -178,7 +178,14 @@ ingest endpoint
   |   writes notes/ + events.jsonl
   |
   v
-aggregator (a batch script, not a service)
+  |   the endpoint starts the aggregator itself, after a quiet window: one note
+  |   arrives as two accepts (both hooks fire) and a session writes several, so
+  |   waiting turns a session's work into ONE run instead of four
+  |
+  v
+aggregator (a batch script the endpoint launches — no cron, no scheduler)
+  |   git pull --ff-only first, and SKIP the run if that fails: merging onto a
+  |     stale artifact re-proposes the lines a reviewer just deleted
   |   pass 1  intake filter, majority of 3 votes: drops machine-local notes
   |   pass 2  merge against the WHOLE current file: sharpen, merge, delete, promote
   |
@@ -438,6 +445,14 @@ Three places, and only the middle one is new infrastructure.
 | **Member machine ×N** | the repo clone (hooks, `.claude/settings.json`, `AGENTS.md`), the auto-memory directory, the spool | Claude Code, and either a POSIX shell **or** node — both hooks are registered and whichever runtime exists does the work. No inbound port. One credential file, copied once — and none at all if the host is on the LAN |
 | **Knowledge host ×1** | `ingest.js` on a port, `inbox/`, and `aggregate.js` | node; reachable from member machines; **Claude Code installed and logged in**, because `aggregate.js` runs two model passes via `claude -p` |
 | **Git server** | the repo, and wherever PRs are reviewed | nothing new — no forge API is used |
+
+**Nothing schedules this.** The design rejected a weekly cron early — a pipeline that distils on a
+timer stops feeling automatic, and the point was to review knowledge *when it arrives*. So the trigger
+lives in `ingest.js`, which is already resident, and adds no component: a note schedules a run after a
+quiet window, a note arriving mid-run marks it for exactly one follow-up rather than queueing another,
+and a `git pull --ff-only` that fails aborts the run instead of merging onto stale state. Configure it
+per project with an `aggregate` block in `config.json`; a project without one only receives notes, and
+`aggregate.js` still runs by hand exactly as before.
 
 The easy one to miss is the middle row: `aggregate.js` is a batch script that calls a model, not a
 service. Whichever box runs it needs Claude Code present and authenticated, and it does not have

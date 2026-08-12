@@ -1,7 +1,7 @@
 // Aggregator: turns per-person memory notes into a reviewed team artifact.
 //
 //   node aggregate.js --store <memory-dir> --events events.jsonl \
-//                     --artifact ../AGENTS.md [--cap 50] [--model sonnet]
+//                     --artifact ../AGENTS.md [--cap 50] [--model opus]
 //                     [--votes 3] [--commit]
 //
 // Inputs come from the ingest endpoint: notes/ holds the content, events.jsonl holds
@@ -30,7 +30,12 @@ const store = opt('store', null);
 const eventsFile = opt('events', null);
 const artifact = opt('artifact', null);
 const cap = parseInt(opt('cap', '50'), 10);
-const model = opt('model', 'sonnet');
+// opus, not sonnet. Measured on the same 29 cases and the same prompt: opus 100% / haiku 89.7% /
+// sonnet 69%, with sonnet dropping half the real knowledge while keeping perfect precision — the
+// most dangerous shape a filter can have, because nothing appears anywhere to show what was lost.
+// See docs/findings.md §3. This used to default to sonnet, which meant every run that forgot the flag
+// risked discarding the note it was called to distil.
+const model = opt('model', 'opus');
 const votes = parseInt(opt('votes', '3'), 10);
 
 if (!store || !artifact) {
