@@ -210,6 +210,44 @@ corpus you keep; this optimises what is worth keeping at all.
 Seen next to that pattern, this is the compile step applied to a team instead of a person: many
 agents' raw notes in, one reviewed page out, with a human at the gate.
 
+## "How do you know it isn't missing things?"
+
+It is missing things, and the honest answer is that this cannot be measured the way the rest of the
+system can. Measuring recall needs a denominator — how much knowledge a session contained — and that
+number does not exist. Every figure here is *how much of what someone thought to enumerate was
+captured*, never *how much was lost*. That limitation is structural, and it applies to every capture
+system, this one and the prior art alike.
+
+So the claim is deliberately narrow: **what gets written reaches the team through a measured filter
+and a human gate.** Whether everything worth writing gets written is the weak link, and it is the
+part to be sceptical about.
+
+Three things make it less bad than it sounds, and one makes it worse.
+
+**Redundancy across people and time.** Capture does not have to be reliable per session. The same
+trap gets hit by several people, repeatedly, and one person's miss is another's note. At the ~88%
+per-encounter rate measured here, two encounters reach 98.4% and three reach 99.8%. Machine-local
+memory has none of this: there, every miss is relearned from scratch by the next person.
+
+**But those misses are not independent.** The whole team runs the same instruction against the same
+model, so failures correlate. One planted class was captured 2/4 — at a 50% rate, three encounters
+still only reach 87.5%. Redundancy rescues random misses and does almost nothing for systematic
+blind spots, and a systematic blind spot is by definition the one nobody enumerated.
+
+**Redundancy also only covers what recurs.** A trap recurs. A decision taken once in a discussion,
+settled and never revisited, has no second encounter to catch it. That loss is permanent.
+
+**The failure is asymmetric, and the system is tuned for it.** Over-capture costs one filter pass at
+100% measured precision; under-capture is forever. That is why the capture instruction carries no
+closed list of categories and errs toward writing.
+
+**What is genuinely absent: any signal that a session produced nothing.** Everything in the pipeline
+observes notes that exist. A session that ran, learned something, and recorded nothing is invisible —
+which is exactly the shape of the `CLAUDE.md` instruction quietly ceasing to work. The fix is the one
+job OTel is kept around for: a metric counting sessions that yielded no knowledge at all. It is
+designed, described under [Measured](#measured), and **not built**. It is the largest open gap in this
+project, larger than anything under [Status](#status-and-what-is-not-verified-yet).
+
 ## Editing the file by hand
 
 You are the reviewer. The machine's format is not yours to learn.
