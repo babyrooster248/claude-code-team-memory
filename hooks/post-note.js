@@ -5,10 +5,12 @@
 // teardown, and does not fire at all on /clear, on a crash, or on Ctrl-C. PostToolUse
 // fires on the write itself, so nothing depends on how the session happens to end.
 //
-// Why an HTTP POST rather than git: pushing needs a credential that happens to be
-// present and unexpired on that laptop. An internal endpoint needs nothing, and the
-// config that points at it is committed in the project's .claude/settings.json, so a
-// member who clones the repo is already participating without setting anything up.
+// Why an HTTP POST rather than git: pushing needs a credential that can write to the
+// repository, that whoever issued it controls, and that expires on its own schedule —
+// so the pipeline stops weeks before anyone notices. On a LAN this endpoint needs no
+// credential at all. Off the LAN it needs one, and the difference that matters is that
+// this one can only append to an inbox a filter and a human then gate, the tech lead
+// revokes it, and when it is missing the notes spool instead of disappearing.
 //
 // This hook must never break a session. Every failure path exits 0.
 
@@ -180,7 +182,7 @@ function post(url, note, onFail, auth) {
     // issued, a credential just revoked. Those get fixed, and a note dropped meanwhile is gone for
     // good — so spool it. Every other 4xx is a judgement about this note, which retrying cannot
     // change, so drop it and say why.
-    else if (res.statusCode === 401 || res.statusCode === 403) {
+    else if (res.statusCode === 401 || res.statusCode === 403 || res.statusCode === 429) {
       onFail(`ingest returned ${res.statusCode} — check .claude/agent-knowledge.env`);
     }
     else if (res.statusCode >= 400 && res.statusCode < 500) { log(`refused ${res.statusCode} by ingest, dropping`); done(); }

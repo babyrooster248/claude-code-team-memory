@@ -253,6 +253,28 @@ function fromHeaders(req, body) {
   };
 }
 
+// A token bucket per sender. Needed whether or not authentication is on, and for a reason that has
+// nothing to do with attackers: every note that arrives costs three model calls downstream, so a
+// hook stuck in a loop or one leaked token can spend a month's budget before anyone looks. Keyed by
+// credential where there is one and by address otherwise.
+//
+// Deliberately generous. This is a backstop against runaway cost, not a throttle on people: a
+// member having a heavy day should never be the reason a trap goes unrecorded.
+const RATE = Object.assign({ notesPerHour: 120, burst: 30 },
+  (config && config.rateLimit) || {});
+const buckets = new Map();
+function overLimit(key) {
+  const now = Date.now();
+  const refillPerMs = RATE.notesPerHour / 3600000;
+  const b = buckets.get(key) || { tokens: RATE.burst, last: now };
+  b.tokens = Math.min(RATE.burst, b.tokens + (now - b.last) * refillPerMs);
+  b.last = now;
+  if (b.tokens < 1) { buckets.set(key, b); return true; }
+  b.tokens -= 1;
+  buckets.set(key, b);
+  return false;
+}
+
 // Returns the authenticated member and their project, or a reason to refuse. Every failure gets
 // the same 401 body: distinguishing "no such project" from "no such member" from "wrong token"
 // tells an outsider which of the three they guessed right.
@@ -301,6 +323,14 @@ http.createServer((req, res) => {
     console.error(`[ingest] 401 (${auth.fail}) from ${req.socket.remoteAddress}`);
     return send(401, { error: 'not authorised' },
       auth.challenge ? { 'WWW-Authenticate': 'Basic realm="agent-knowledge"' } : {});
+  }
+
+  // 429 rather than a silent drop, and the senders spool on it: a rate limit is meant to delay
+  // knowledge, never to destroy it.
+  const rateKey = auth.email ? `${auth.projectId}:${auth.email}` : String(req.socket.remoteAddress);
+  if (overLimit(rateKey)) {
+    console.error(`[ingest] 429 rate limited ${rateKey} — ${RATE.notesPerHour}/hour, burst ${RATE.burst}`);
+    return send(429, { error: 'rate limited, retry later' }, { 'Retry-After': '600' });
   }
 
   const chunks = [];

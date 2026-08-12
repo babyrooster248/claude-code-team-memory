@@ -122,6 +122,17 @@ const events = (dir) => {
   await send({ auth: basic(lan.email, lan.token), project: 'catalog-svc', claimKey: 'shared-account' });
   check('two credentials, one Claude account → warned', /two credentials/.test(serverLog), true);
 
+  // Rate limiting. The bucket is per credential, so one member cannot spend the whole team's
+  // budget, and the response must be 429 rather than a drop — the senders spool on 429, and a rate
+  // limit that discarded notes would be a cost control that destroys knowledge.
+  let sawLimit = 0;
+  for (let i = 0; i < 40; i++) {
+    if (await send({ auth: basic(lan.email, lan.token), project: 'storefront' }) === 429) sawLimit++;
+  }
+  check('sustained sending eventually rate limits', sawLimit > 0, true);
+  check('a different member is not limited by it',
+    await send({ auth: basic(minh.email, minh.token), project: 'catalog-svc' }), 200);
+
   server.kill();
 
   // A non-loopback bind without TLS in front must refuse to start rather than serve credentials
@@ -132,7 +143,7 @@ const events = (dir) => {
   check('refuses 0.0.0.0 without --behind-tls-proxy', r.status, 2);
   check('and says why', /cleartext/.test(r.stderr), true);
 
-  const total = 16;
+  const total = 18;
   console.log(fails ? `\n${fails}/${total} case(s) failed` : `\n${total}/${total} passed`);
   fs.rmSync(tmp, { recursive: true, force: true });
   process.exit(fails ? 1 : 0);

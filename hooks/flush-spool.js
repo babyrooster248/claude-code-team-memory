@@ -93,6 +93,9 @@ function send(id) {
       // would burn the entire spool over a config error, which is the most destructive thing this
       // hook could do. Everything else in the 4xx range is still a verdict on the note itself.
       if (code === 401 || code === 403) return resolve(`${id}: kept (${code}, check credential)`);
+      // 429 likewise: a rate limit exists to delay knowledge, never to destroy it. A flusher that
+      // discarded on it would empty the spool precisely when the endpoint asked it to slow down.
+      if (code === 429) return resolve(`${id}: kept (429 rate limited)`);
       if ((code >= 200 && code < 300) || (code >= 400 && code < 500)) {
         drop();
         resolve(`${id}: ${code >= 300 ? 'refused ' + code + ', discarded' : 'delivered'}`);

@@ -288,6 +288,47 @@ job OTel is kept around for: a metric counting sessions that yielded no knowledg
 designed, described under [Measured](#measured), and **not built**. It is the largest open gap in this
 project, larger than anything under [Status](#status-and-what-is-not-verified-yet).
 
+## Is authentication actually needed, or would a rate limit do?
+
+Worth answering precisely, because the two protect against almost disjoint things and neither is
+about the risk people assume.
+
+**Nothing here can leak project knowledge, with or without auth.** The endpoint has no read path:
+`GET /health` returns `{ok:true}`, `POST /note` writes, everything else is a 404. No route returns a
+note, an event, or a listing. The POST response echoes only a filename built from what the sender
+itself supplied, and the contributor count goes to the server log rather than the response. Notes are
+written under `path.basename`, so a crafted path cannot traverse out of the inbox.
+
+| Risk | Rate limit | Auth |
+| --- | --- | --- |
+| Reading the team's knowledge | not applicable | **not applicable — there is no read path** |
+| Burning the model budget (every note costs three calls) | **yes, this is its job** | partly |
+| Filling the inbox and the disk | yes | partly |
+| Getting text into `AGENTS.md` | no | partly — the human PR gate is the real control |
+| **Forging a contributor to reach auto-apply** | **no — two notes is enough** | **only auth stops this** |
+
+The last row is the one that requires authentication. Promotion from `(unconfirmed, 1 person)` to
+`(2 people)` needs **two** notes from two identities, not many, so no throttle touches it — and
+`(2 people)` is the auto-apply path, the only change that merges without a person looking.
+
+Content injection is a different matter, and the honest answer is that the human PR gate stops it,
+not auth. But dropping auth means a reviewer reads real notes **mixed with notes from anyone who
+knows the URL**, and a tired reviewer approving is how an injection lands. `AGENTS.md` is loaded into
+every teammate's agent on every session, which makes it a more valuable target than ordinary docs.
+
+**Rate limiting is in regardless**, because it protects against something authentication does not: a
+hook stuck in a loop, or one leaked token, spending a month's budget before anyone checks. Default
+120 notes/hour per credential with a burst of 30, configurable, generous on purpose — a member having
+a heavy day must never be the reason a trap goes unrecorded.
+
+One trap worth naming, because getting it wrong would have made the rate limit worse than useless:
+**429 is a 4xx**, and every sender used to discard 4xx as "unacceptable forever". A rate limit that
+discarded notes would be a cost control that destroys knowledge. Both senders and both flushers now
+spool on 429 and on 401/403, and drop only on the codes that are a verdict about the note itself.
+
+**If the host is on the LAN, skip all of it.** Run without `--config`: no credential anywhere, no
+member setup, and the endpoint refuses to bind anything but loopback.
+
 ## Editing the file by hand
 
 You are the reviewer. The machine's format is not yours to learn.
@@ -412,7 +453,7 @@ that do not work, and the numbers proving it.
 | `hooks/agent-knowledge.env.sample` | the member's one-time copy-and-fill credential file |
 | `aggregator/config.sample.json` | server config — projects, members, credential hashes |
 | `aggregator/make-credential.js` | issues one member credential; prints the config entry and the member's two lines |
-| `aggregator/auth-test.js` | 16 cases over auth — forged identity, cross-project writes, cleartext refusal |
+| `aggregator/auth-test.js` | 18 cases over auth and rate limiting — forged identity, cross-project writes, 429 handling, cleartext refusal |
 | `aggregator/ingest.js` | receives notes; refuses unattributable ones and anything carrying a credential |
 | `aggregator/secret-test.js` | 26 cases over the secret scan — 10 refused, 16 that must not be |
 | `aggregator/merge-prompt.md` | the merge pass: sharpen, merge, delete, promote |

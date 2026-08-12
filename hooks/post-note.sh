@@ -208,6 +208,9 @@ case "$code" in
   # 401 and 403 are the machine's problem, not the note's — an env file not copied yet, a token
   # revoked. Those get fixed; a note dropped in the meantime is gone for good, so spool it.
   401|403) spool_it "http $code — check .claude/agent-knowledge.env" ;;
+  # 429 is the endpoint asking for patience, not a verdict on the note. Dropping here would let a
+  # rate limit destroy knowledge, which is the one thing a rate limit must never do.
+  429) spool_it "http 429 rate limited" ;;
   # Any other 4xx is a judgement about this note that retrying cannot change.
   4*) log "refused $code by ingest, dropping" ;;
   *)  spool_it "curl http $code" ;;

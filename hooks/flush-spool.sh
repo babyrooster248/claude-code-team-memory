@@ -80,6 +80,8 @@ for head in "$SPOOL"/*.head; do
     # discarding was right; now the commonest 4xx is a credential problem, and discarding on it
     # would burn the whole spool over a config error.
     401|403) log "$id: kept ($code, check credential)" ;;
+    # Kept for the same reason: a rate limit delays knowledge, it does not reject it.
+    429) log "$id: kept (429 rate limited)" ;;
     # Any other 4xx is still a verdict on the note itself, which retrying cannot change.
     4*) rm -f "$head" "$body"; log "$id: refused $code, discarded" ;;
     *)  log "$id: kept (http $code)" ;;
