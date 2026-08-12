@@ -10,7 +10,7 @@ inbox-*/
 
 # Eval and test output. Numbers belong in docs/findings.md, where they carry the reasoning that
 # makes them mean something — a bare JSON dump of the last run does not.
-eval/last-run.json
+eval/last-run*.json
 eval/*.txt
 
 # Scratch directories the test suites create next to the code when run outside a temp dir.

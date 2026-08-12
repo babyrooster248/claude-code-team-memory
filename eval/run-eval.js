@@ -53,8 +53,14 @@ const fp = results.filter(r => r.expect === 'drop' && r.verdict === 'KEEP').leng
 const fn = results.filter(r => r.expect === 'keep' && r.verdict === 'DROP').length;
 const tn = results.filter(r => r.expect === 'drop' && r.verdict === 'DROP').length;
 
+// The CLI version belongs next to the score. A number without the model and version that
+// produced it is not a measurement: this filter scored 94.4% recall on a small model and
+// 50.0% on a larger one, and the README carried the first figure long after it stopped
+// describing the documented command.
+const cli = (spawnSync('claude', ['--version'], { encoding: 'utf8', shell: true }).stdout || '').trim();
+
 const pct = n => (100 * n).toFixed(1) + '%';
-console.log('\n--- ' + model + ', ' + runs + ' run(s) per case, n=' + results.length + ' ---');
+console.log('\n--- ' + model + ' via ' + (cli || 'unknown cli') + ', ' + runs + ' run(s) per case, n=' + results.length + ' ---');
 console.log('accuracy   ' + pct((tp + tn) / results.length));
 console.log('precision  ' + pct(tp / (tp + fp)) + '   (of what reaches the file, how much belongs)');
 console.log('recall     ' + pct(tp / (tp + fn)) + '   (of real knowledge, how much survives)');
@@ -66,4 +72,10 @@ if (misses.length) {
   console.log('\nmisses:');
   for (const m of misses) console.log(`  ${m.id} [${m.src}] exp=${m.expect} got=${m.verdict}\n    note: ${m.note}\n    model: ${m.reason}`);
 }
-fs.writeFileSync(path.join(here, 'last-run.json'), JSON.stringify(results, null, 2));
+// Keyed by model: comparing two models is the normal case, and a single last-run.json means
+// the second run silently destroys the first one's record — which is how a stale number
+// survives in the README long after it stopped being true.
+fs.writeFileSync(
+  path.join(here, `last-run-${model}.json`),
+  JSON.stringify({ model, runs, cli, date: new Date().toISOString().slice(0, 10), results }, null, 2)
+);

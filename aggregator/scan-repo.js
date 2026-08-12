@@ -11,6 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const root = process.argv[2] || path.join(__dirname, '..');
 const src = fs.readFileSync(path.join(__dirname, 'ingest.js'), 'utf8');
@@ -31,10 +32,22 @@ function walk(dir, out = []) {
   return out;
 }
 
+// The question this tool answers is "could a secret reach a commit", so the scope is what git
+// would publish: tracked files plus untracked ones that are not ignored. Walking the whole tree
+// instead reports files that cannot be committed at all — eval run records, local scratch — and a
+// scanner that cries wolf about those teaches people to skim past the one line that mattered.
+// Falls back to the walk when this is not a git repository, so the script still runs standalone.
+function candidates() {
+  const r = spawnSync('git', ['-C', root, 'ls-files', '--cached', '--others', '--exclude-standard'],
+    { encoding: 'utf8' });
+  if (r.status !== 0 || !r.stdout) return walk(root);
+  return r.stdout.split('\n').filter(Boolean).map(f => path.join(root, f));
+}
+
 const findings = [];
 const inFixtures = [];
 
-for (const file of walk(root)) {
+for (const file of candidates()) {
   let text;
   try { text = fs.readFileSync(file, 'utf8'); } catch { continue; }
   const rel = path.relative(root, file).replace(/\\/g, '/');

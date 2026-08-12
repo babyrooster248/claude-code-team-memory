@@ -37,26 +37,70 @@ would be noise or actively wrong for a teammate with different settings.
 Filtering environment from codebase is therefore a requirement of the aggregator,
 not an optimisation.
 
-## 3. The intake filter: 96.6% accuracy, no junk through
+## 3. The intake filter is model-bound, and not monotonically
 
-Current figures, 29 labelled cases drawn from a real project's memory directory and from the
-sandbox, majority of three votes, small model:
+29 labelled cases, majority of three votes, same prompt, same cases, `claude` 2.1.227,
+all three measured on 2026-08-12:
 
-| | |
-| --- | --- |
-| accuracy | **96.6%** |
-| precision | **100%** — nothing that reaches the file is junk |
-| recall | **94.4%** |
-| junk let through | **0** |
-| knowledge lost | **1** — `pref-01`, the documented limitation below |
+| model | accuracy | precision | recall | junk through | knowledge lost | unstable |
+| --- | --- | --- | --- | --- | --- | --- |
+| **opus** | **100%** | **100%** | **100%** | 0 | 0 | **0** |
+| haiku | 89.7% | 94.1% | 88.9% | **1** | 2 | 2 |
+| sonnet | 69.0% | 100% | **50.0%** | 0 | **9** | 2 |
 
-The single miss is a commit-message convention, and it is left in the set labelled `keep` on
-purpose so that the limitation shows up in the numbers rather than being relabelled away. A
-second case of the same class, `pref-02`, splits its votes rather than failing outright, which
-says the model finds this class genuinely borderline rather than reliably wrong.
+Reproduce with `node run-eval.js --model <name> --runs 3` then `node compare-models.js`.
+
+**The middle model is the worst, by a wide margin.** Sonnet's failure is not noise: 9 of its
+11 disagreements are cases where it alone drops real project knowledge, and only 2 of its cases
+split their votes, so it is wrong consistently rather than uncertainly. Its own stated reasons
+show the mechanism — on `force-03` it answered *"machine/repo-cwd invocation detail, not durable
+project knowledge"*, and lines 44–47 of `filter-prompt.md` name that exact case as one that must
+not be dropped. The DROP rules are a checklist. A small model follows it. A large model reads
+past it to the intent. A model in between is clever enough to construct a justification for
+overriding it and not clever enough to see that the prompt already anticipated the argument.
+
+Precision and recall fail differently and the table separates them on purpose. Junk reaching the
+file costs context and is visible to the next reader. Knowledge dropped at intake is **invisible**:
+nothing appears anywhere, and the team never learns what its agents forgot. Sonnet's 100%
+precision alongside 50% recall is the worst-looking-good configuration in the set.
+
+### The limitation I documented was a model limitation
+
+`pref-01` and `pref-02` — team commit-message conventions — were recorded here and in the README
+as a limitation of the *design*: the filter supposedly could not separate process conventions from
+invocation detail "without collateral damage, measured twice". Opus classifies both correctly,
+with the reason `commit-message convention affecting shared repo history; newcomers would violate
+it`, which is bullet five of the KEEP list verbatim. The rule was never missing from the prompt.
+Two rounds of prompt rewriting went after it anyway, and both regressed and had to be reverted —
+one of them dropped three real entries and quoted my own new wording back at me as justification.
+Both rounds were fixing the wrong layer.
+
+The lesson generalises past this project: before rewriting a prompt to fix a classification
+failure, check whether a stronger model already gets it right with the prompt unchanged. Prompt
+text is the layer people reach for because it is the layer they control.
+
+### The published figure did not survive contact with a re-run
+
+This section previously read **96.6% / 100% / 94.4%, junk through 0**, described as measured on
+a "small model". That figure reproduces on none of the three models above — haiku, the closest
+candidate, now scores 89.7% and lets one junk case through, so even the precision claim fails.
+Two things went wrong, and only one of them is drift:
+
+1. The figure was recorded without the model or the CLI version beside it, so nothing about it
+   was checkable. `run-eval.js` now writes both into `last-run-<model>.json`, and prints the CLI
+   version in the summary header.
+2. The prompt version that produced it can no longer be recovered: the development history was
+   squashed into a single commit before publishing, so there is no earlier `filter-prompt.md` to
+   diff against. Whether the gap is model drift or a prompt that changed underneath the number is
+   now unanswerable. That is the real cost of the squash, and it is recorded rather than glossed.
+
+**Majority voting does not protect against this.** Three votes smooth *noise*, and sonnet's error
+is *bias* — it voted the same wrong way three times on 7 of its 9 misses. A guard against variance
+is not a guard against a systematic misreading, and reporting only the aggregate hid that
+distinction until the per-case table was built.
 
 The history below is kept because two rounds of it went backwards, and the record of how is
-worth more than the final figure.
+worth more than any single figure.
 
 ### How it got here
 
@@ -326,7 +370,9 @@ the premise was wrong twice over.
 
 First, the reviewer never got the chance. A note saying "don't put a Co-Authored-By trailer in
 commit messages" was dropped by the **intake filter**, not deferred to review — so the boundary
-was already being decided, silently, by a model at 94% precision.
+was already being decided, silently, by a model — and, as §3 later established, by *which* model.
+That note is `pref-01`: haiku and sonnet drop it, opus keeps it. The boundary between personal and
+shared was moving with the model choice, which is not a place to leave a boundary.
 
 Second, the filter is not drawing the personal-versus-shared line at all. It keeps "source code
 must be 100% English", and it keeps "pushing to master auto-deploys to UAT" — both plainly team
@@ -352,7 +398,8 @@ Both numbers are reported rather than only the better one.
 
 [claude-session-memory](https://github.com/teamspwk/claude-session-memory) scans cards for API
 keys, tokens and DB URLs before creating them. This project had no equivalent, and the gap was
-an asymmetry rather than an oversight: the intake filter is a model at 94% precision, and its
+an asymmetry rather than an oversight: the intake filter is a model whose precision depends on
+which model it is — measured at 100% on opus and 94.1% on haiku — and its
 usual mistake — a mildly useless line reaching the file — costs a little context. The mistake
 that matters here costs a rotated credential and a rewritten git history, because the artifact
 is committed. Two failures whose costs differ that much should not share one probabilistic

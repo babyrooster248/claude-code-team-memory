@@ -218,19 +218,32 @@ so it runs in CI on the PR regardless of which forge you use.
 
 ## Measured
 
-Numbers, not claims. Full method and the failed designs are in [`docs/findings.md`](docs/findings.md).
+Numbers, not claims — each with the model and CLI version that produced it, because a score
+without those is not checkable. All filter figures: `claude` 2.1.227, 2026-08-12, 29 labelled
+cases, majority of 3 votes. Full method and the failed designs are in
+[`docs/findings.md`](docs/findings.md).
 
 | What | Result |
 | --- | --- |
 | Agents saving knowledge, no `CLAUDE.md` instruction | **0 / 3** sessions |
 | Agents saving knowledge, 5-line instruction | **2 / 2** sessions |
 | Notes that are machine-local rather than project knowledge | **1 in 3** |
-| Intake filter, 29 labelled cases, majority of 3 | **96.6%** accuracy, **100%** precision, **94.4%** recall |
-| Junk that reached the artifact | **0** |
+| Intake filter on **opus**, 29 cases, majority of 3 | **100%** accuracy / precision / recall, 0 unstable |
+| Same prompt on **haiku** | 89.7% accuracy, 94.1% precision, 88.9% recall — 1 junk through |
+| Same prompt on **sonnet** | 69.0% accuracy, 100% precision, **50.0% recall** — 9 dropped |
 | Secret scan | **26 / 26** — 10 credentials refused, 16 lookalikes passed |
 | Hand-edit and auto-apply guard | **16 / 16**, no model needed |
 | Hook cost inside the memory directory / on any other write | **~160ms** / **~100ms** |
 | Runtimes verified | Windows + Git Bash, Ubuntu 24.04, Alpine 3.20 |
+
+**Run it on opus.** The three rows above are the same prompt on the same 29 cases, and the middle
+model is the worst by a wide margin — sonnet drops half the real knowledge while keeping 100%
+precision, which is the most dangerous shape a filter can have, because nothing appears anywhere
+to show what was lost. The mechanism is visible in its own reasoning: the DROP rules are a
+checklist, a small model follows it, a large model reads past it to the intent, and a model in
+between constructs a justification for overriding it. Assuming "bigger model, better filter" is
+not safe here, and neither is assuming the opposite — measure the one you intend to run with
+`node eval/compare-models.js`.
 
 Why OTel is not in the diagram: an earlier revision routed notes through it, and `tool_input`
 turned out to be truncated at ~300 characters on the wire (measured: 8918 B in, 300 chars out;
@@ -279,7 +292,7 @@ The space is crowded, and saying so plainly is more useful than letting you disc
 Three of those were found while checking whether this project's own name was taken.
 
 The overlap runs both ways. claude-session-memory scans cards for credentials before creating
-them; this project had no such check, relying on a model at 94% precision to catch a failure whose
+them; this project had no such check, relying on a probabilistic filter to catch a failure whose
 cost is a rotated secret and a rewritten history. That scan is now here, deterministic and ahead
 of the model, with `aggregator/secret-test.js` covering both what must be refused and what must
 not be.
@@ -316,12 +329,17 @@ that do not work, and the numbers proving it.
 | `aggregator/scan-repo.js` | runs the secret scan over this repo itself |
 | `eval/cases.jsonl` | 29 labelled notes from real projects — the acceptance test |
 | `eval/filter-prompt.md` | intake filter: does this note belong in a shared file |
-| `eval/run-eval.js` | scores the filter; `--runs 3` for majority vote |
+| `eval/run-eval.js` | scores the filter; `--runs 3` for majority vote, `--model` to pick one |
+| `eval/compare-models.js` | scores every model side by side, and lists the cases they disagree on |
 | `docs/findings.md` | every measurement, including the designs that failed |
 
 ```bash
-npm test                                  # all four suites, no network, no model
-cd eval && node run-eval.js --runs 3      # scores the filter; needs a model
+npm test                                     # all four suites, no network, no model
+
+cd eval                                      # these need a model
+node run-eval.js --model opus --runs 3       # the configuration to run in production
+node run-eval.js --model haiku --runs 3
+node compare-models.js                       # side by side, plus every disagreement
 ```
 
 ## Status, and what is not verified yet
@@ -338,12 +356,21 @@ find them:
   except the 29 eval cases, which are real notes from a six-month codebase.
 - **A machine with neither node nor a POSIX shell is silent, not detected.** A `SessionStart` hook
   of `type: "http"` as a beacon would fix it and is not built.
+- **The filter's accuracy belongs to the model, not to this repo.** It scores 100% on opus and 50%
+  recall on sonnet with the prompt untouched, so upgrading, downgrading or switching the model is a
+  change to the filter and has to be re-measured. Pin the model you run.
 
 Also known and documented: a line that was true, that the code has since made false, and that
 nobody hits again, has no trigger to correct it. The only mitigation is keeping the file small and
-specific. And the intake filter cannot separate process conventions (commit-message rules) from
-invocation detail without collateral damage — measured twice, left as a stated limitation rather
-than relabelled away.
+specific.
+
+One published figure was wrong and is worth saying plainly rather than quietly correcting. This
+README previously claimed the filter scored 96.6% accuracy with zero junk through, and described
+commit-message conventions as knowledge the filter fundamentally could not classify. Re-measured,
+that figure reproduces on no model available today, and opus classifies those conventions correctly
+using a rule the prompt already contained — so the "limitation" was the model's, and two rounds of
+prompt rewriting had gone after the wrong layer. The figure had been recorded without the model or
+version beside it, which is what let it survive. `docs/findings.md` §3 keeps the full account.
 
 ## What is deliberately absent
 
