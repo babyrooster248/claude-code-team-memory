@@ -37,13 +37,13 @@ function send(kind, file, ingestUrl) {
       hook_event_name: 'PostToolUse', tool_name: 'Write', session_id: 'spool',
       cwd: proj, tool_input: { file_path: file, content: 'read from disk' },
     }),
-    env: { ...process.env, AGENT_KNOWLEDGE_INGEST: ingestUrl },
+    env: { ...process.env, AGENT_KNOWLEDGE_INGEST: ingestUrl, AGENT_KNOWLEDGE_USER: "spool@example.com", AGENT_KNOWLEDGE_TOKEN: "spool-token" },
   }).status;
 }
 function flush(kind, ingestUrl) {
   const [cmd, args] = flusher(kind);
   return spawnSync(cmd, args.map(a => path.join(__dirname, a)), {
-    env: { ...process.env, AGENT_KNOWLEDGE_INGEST: ingestUrl },
+    env: { ...process.env, AGENT_KNOWLEDGE_INGEST: ingestUrl, AGENT_KNOWLEDGE_USER: "spool@example.com", AGENT_KNOWLEDGE_TOKEN: "spool-token" },
   }).status;
 }
 

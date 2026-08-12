@@ -118,10 +118,44 @@ function headerLines(note) {
     `X-Session-Id: ${note.session_id || ''}`,
     `X-Note-Ts: ${note.ts}`,
     `X-Note-Tool: ${note.tool || ''}`,
+    // Which project this note belongs to, so one host can serve several. Committed with the repo
+    // and not a secret. Deliberately absent from this list: the credential — see credential().
+    `X-Project: ${note.project || ''}`,
   ];
 }
 
-function post(url, note, onFail) {
+// Read from `.claude/agent-knowledge.env` in the project, which is gitignored, and never written
+// into the spool. A spooled note is a file sitting on disk possibly for days; putting the token in
+// its replayable header block would turn every unsent note into a second copy of the credential.
+// The flushers read this the same way at send time.
+function credential(startDir) {
+  let user = process.env.AGENT_KNOWLEDGE_USER || '';
+  let token = process.env.AGENT_KNOWLEDGE_TOKEN || '';
+
+  // Walks up for the same reason the settings lookup does: a member who opens Claude in a
+  // subdirectory would otherwise have no credential and no idea why, which is the silent-failure
+  // shape this project keeps re-learning.
+  let dir = path.resolve(startDir);
+  for (let i = 0; i < 24 && (!user || !token); i++) {
+    const f = path.join(dir, '.claude', 'agent-knowledge.env');
+    try {
+      for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
+        const m = /^\s*(AGENT_KNOWLEDGE_USER|AGENT_KNOWLEDGE_TOKEN)\s*=\s*(.*?)\s*$/.exec(line);
+        if (!m || !m[2]) continue;
+        if (m[1].endsWith('USER')) user = user || m[2];
+        else token = token || m[2];
+      }
+    } catch { /* absent: keep walking */ }
+    const up = path.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+
+  if (!user || !token) return null;
+  return 'Basic ' + Buffer.from(`${user}:${token}`, 'utf8').toString('base64');
+}
+
+function post(url, note, onFail, auth) {
   let u;
   try { u = new URL(url); } catch { return onFail('bad ingest url'); }
   const body = Buffer.from(note.content, 'utf8');
@@ -130,6 +164,7 @@ function post(url, note, onFail) {
     method: 'POST',
     headers: Object.assign(
       { 'Content-Type': 'text/markdown; charset=utf-8', 'Content-Length': body.length },
+      auth ? { Authorization: auth } : {},
       // Same lines the spool stores, so a spooled note replays as the identical request.
       headerLines(note).reduce((h, line) => {
         const i = line.indexOf(': ');
@@ -141,8 +176,13 @@ function post(url, note, onFail) {
   }, res => {
     res.resume();
     if (res.statusCode >= 200 && res.statusCode < 300) { log(`sent ${note.file_path} (${body.length} bytes)`); done(); }
-    // 4xx means the endpoint judged the note unacceptable — spooling would retry it
-    // forever, so drop it and say why.
+    // 401 and 403 are the machine's problem, not the note's: a missing env file, a token not yet
+    // issued, a credential just revoked. Those get fixed, and a note dropped meanwhile is gone for
+    // good — so spool it. Every other 4xx is a judgement about this note, which retrying cannot
+    // change, so drop it and say why.
+    else if (res.statusCode === 401 || res.statusCode === 403) {
+      onFail(`ingest returned ${res.statusCode} — check .claude/agent-knowledge.env`);
+    }
     else if (res.statusCode >= 400 && res.statusCode < 500) { log(`refused ${res.statusCode} by ingest, dropping`); done(); }
     else onFail(`ingest returned ${res.statusCode}`);
   });
@@ -252,7 +292,17 @@ const note = {
   // their notes, so it checks the note against the root the sender claims rather than
   // against a path shape of its own.
   memory_root: memoryRoot,
+  project: process.env.AGENT_KNOWLEDGE_PROJECT || '',
 };
 
 if (!ingest) { spool(note, 'AGENT_KNOWLEDGE_INGEST unset'); done(); }
-post(ingest.replace(/\/$/, '') + '/note', note, why => { spool(note, why); done(); });
+
+// A member who has not copied the env file yet is not an error to swallow: their notes spool and
+// the log says exactly which file to create, so the knowledge waits instead of evaporating.
+const auth = credential(cwd);
+if (!auth) {
+  spool(note, 'no credential — copy hooks/agent-knowledge.env.sample to .claude/agent-knowledge.env');
+  done();
+}
+
+post(ingest.replace(/\/$/, '') + '/note', note, why => { spool(note, why); done(); }, auth);

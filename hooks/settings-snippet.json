@@ -5,8 +5,11 @@
 
   "autoMemoryDirectory": "~/agent-knowledge/catalog-svc",
 
+  "_over_the_internet": "If the host is not on the LAN, this must be https:// and the endpoint must require Basic auth — ingest.js refuses to bind a non-loopback address without TLS in front, because basic auth puts the credential on the wire in a reversible form on every note. Neither value below is a secret and both are committed with the repo; the credential itself lives in .claude/agent-knowledge.env, which each member copies once from hooks/agent-knowledge.env.sample and which is gitignored.",
+
   "env": {
-    "AGENT_KNOWLEDGE_INGEST": "http://aggregator.internal:8791"
+    "AGENT_KNOWLEDGE_INGEST": "https://aggregator.example.com",
+    "AGENT_KNOWLEDGE_PROJECT": "catalog-svc"
   },
 
   "_two_runtimes": "Both hooks are registered on purpose and no detection logic is needed. Claude Code never runs on Node — even the npm package only downloads a native binary — so node is not implied on any platform; and a POSIX shell is not implied either, since native Windows without Git for Windows has none. A hook whose runtime is missing fails silently without blocking the other one (measured), and on a machine that can run both, the endpoint's dedupe collapses the duplicate (also measured). hooks/parity-test.js asserts the two send byte-identical notes.",

@@ -28,3 +28,13 @@ Thumbs.db
 # Deliberately NOT ignored:
 #   AGENTS.md     — the artifact itself, the whole point
 #   rejected.md   — a reviewer's decisions; losing it means every rejected fact comes back
+
+# Server-side credential store: config.json holds scrypt hashes of member tokens, and the project
+# ids and inbox paths of every team using the host. config.sample.json is the committed shape.
+aggregator/config.json
+
+# Member-side credential. Copied from hooks/agent-knowledge.env.sample and filled in once. This is
+# the one secret on a member's machine, and it must never be the thing that gets committed by
+# reflex — hence a name that does not look like an ordinary .env.
+.claude/agent-knowledge.env
+**/.claude/agent-knowledge.env

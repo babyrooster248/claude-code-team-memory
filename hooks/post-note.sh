@@ -147,6 +147,7 @@ spool_it() {
     printf 'X-Session-Id: %s\n' "$session"
     printf 'X-Note-Ts: %s\n' "$ts"
     printf 'X-Note-Tool: %s\n' "shell"
+    printf 'X-Project: %s\n' "${AGENT_KNOWLEDGE_PROJECT:-}"
   } > "$SPOOL/$id.head"
   log "spooled $id ($1)"
 }
@@ -154,6 +155,34 @@ spool_it() {
 ingest="${AGENT_KNOWLEDGE_INGEST:-}"
 [ -n "$ingest" ] || { spool_it "AGENT_KNOWLEDGE_INGEST unset"; exit 0; }
 ingest="${ingest%/}"
+
+# The credential, read from `.claude/agent-knowledge.env` walking up from the session directory —
+# same walk as the settings lookup, so opening Claude in a subdirectory still finds it. Never
+# written into the spool: an unsent note can sit on disk for days, and putting the token in its
+# replayable header block would make every one of them a second copy of the credential.
+ak_user="${AGENT_KNOWLEDGE_USER:-}"
+ak_token="${AGENT_KNOWLEDGE_TOKEN:-}"
+d="$cwd"
+i=0
+while [ "$i" -lt 24 ]; do
+  f="$d/.claude/agent-knowledge.env"
+  if [ -f "$f" ]; then
+    [ -n "$ak_user" ] || ak_user="$(sed -n 's/^[[:space:]]*AGENT_KNOWLEDGE_USER[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$f" | tr -d '\r' | head -1)"
+    [ -n "$ak_token" ] || ak_token="$(sed -n 's/^[[:space:]]*AGENT_KNOWLEDGE_TOKEN[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$f" | tr -d '\r' | head -1)"
+  fi
+  [ -n "$ak_user" ] && [ -n "$ak_token" ] && break
+  up="$(dirname "$d")"
+  [ "$up" = "$d" ] && break
+  d="$up"
+  i=$((i + 1))
+done
+
+if [ -z "$ak_user" ] || [ -z "$ak_token" ]; then
+  spool_it "no credential — copy hooks/agent-knowledge.env.sample to .claude/agent-knowledge.env"
+  exit 0
+fi
+# `printf | base64` rather than `base64 <<<`: no herestring in POSIX sh, and -w0 is GNU-only.
+auth="Basic $(printf '%s:%s' "$ak_user" "$ak_token" | base64 | tr -d '\n\r')"
 
 # The note is piped in rather than handed to curl as `@filename`. On Windows the shell can
 # open a file whose name has diacritics but curl cannot: it receives the path as UTF-8 bytes
@@ -170,12 +199,16 @@ code="$(cat "$file" | curl -sS -o /dev/null -w '%{http_code}' --max-time 2 -X PO
   -H "X-Session-Id: $session" \
   -H "X-Note-Ts: $ts" \
   -H "X-Note-Tool: shell" \
+  -H "X-Project: ${AGENT_KNOWLEDGE_PROJECT:-}" \
+  -H "Authorization: $auth" \
   "$ingest/note" 2>/dev/null)" || code="000"
 
 case "$code" in
   2*) log "sent $file ($(wc -c < "$file" | tr -d ' ') bytes)" ;;
-  # 4xx means the endpoint judged the note unacceptable and always will, so retrying it
-  # every session would be pointless noise.
+  # 401 and 403 are the machine's problem, not the note's — an env file not copied yet, a token
+  # revoked. Those get fixed; a note dropped in the meantime is gone for good, so spool it.
+  401|403) spool_it "http $code — check .claude/agent-knowledge.env" ;;
+  # Any other 4xx is a judgement about this note that retrying cannot change.
   4*) log "refused $code by ingest, dropping" ;;
   *)  spool_it "curl http $code" ;;
 esac

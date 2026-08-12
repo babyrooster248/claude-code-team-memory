@@ -1,0 +1,36 @@
+{
+  "_comment": "Copy to config.json and edit. config.json is gitignored: it holds credential hashes.",
+
+  "_bind": "Loopback by default. Basic auth sends the credential on every note, reversibly encoded, so exposing this port directly to the internet would put member credentials in cleartext on the wire. Put TLS in front (a reverse proxy is enough) and pass --behind-tls-proxy; the server refuses to bind a non-loopback address without it.",
+  "bind": "127.0.0.1",
+  "port": 8791,
+
+  "_projects": "One server, many projects. The key is the project id, which each repo states in its own .claude/settings.json as AGENT_KNOWLEDGE_PROJECT — that value is not a secret and is committed with the repo. Notes for different projects never share an inbox.",
+  "projects": {
+    "catalog-svc": {
+      "out": "./inbox/catalog-svc",
+
+      "_members": "The allow-list and the credential store are the same map on purpose. A separate list of permitted emails would be a second thing to keep in step, and the failure mode of it drifting is a departed member who can still write. Removing someone is deleting their entry. Generate one with: node aggregator/make-credential.js <email>",
+      "members": {
+        "minh@example.com": {
+          "salt": "1f0c9a7e5b3d2148",
+          "hash": "REPLACE — output of make-credential.js"
+        },
+        "lan@example.com": {
+          "salt": "8b4e2d6f0a9c7135",
+          "hash": "REPLACE — output of make-credential.js"
+        }
+      }
+    },
+
+    "storefront": {
+      "out": "./inbox/storefront",
+      "members": {
+        "minh@example.com": {
+          "salt": "3c7a1e9d5f2b8046",
+          "hash": "REPLACE — a member on two projects gets a separate credential for each, so revoking one does not touch the other"
+        }
+      }
+    }
+  }
+}

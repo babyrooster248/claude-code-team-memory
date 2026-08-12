@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](package.json)
 [![Node](https://img.shields.io/badge/node-%E2%89%A518-informational.svg)](package.json)
-[![Member setup](https://img.shields.io/badge/member%20setup-none-brightgreen.svg)](#what-runs-where)
+[![Member setup](https://img.shields.io/badge/member%20setup-one%20file-brightgreen.svg)](#what-runs-where)
 
 Claude Code's auto memory makes an agent sharper the longer you work on one machine. It is also
 machine-local by design — the docs say so outright: *"Files are not shared across machines or cloud
@@ -14,7 +14,7 @@ does not have, and a new hire's agent starts from zero on a codebase five people
 
 This closes that loop. A note written on one laptop arrives as a pull request on the shared
 artifact; a person approves it; everyone else gets it on their next `git pull`. Nothing to install
-on a member's machine, no credential to hold, no command to remember.
+and no command to remember: a member copies one credential file, once, and never touches it again.
 
 <!-- For the repository settings, so search has something to match on:
 
@@ -63,15 +63,24 @@ session on the same project read the file, ran `migrate` first, walked past the 
 
 ## Quick start
 
-Three roles. Only the first two involve any work, and both are one-time.
+Three roles. Every step below is one-time.
 
 **1. Knowledge host** — one box the team can reach. Needs node, plus Claude Code logged in.
 
 ```bash
 git clone https://github.com/<you>/claude-code-team-memory
 cd claude-code-team-memory
-node aggregator/ingest.js --port 8791 --out ./inbox     # resident; notes land here
+
+cp aggregator/config.sample.json aggregator/config.json   # projects + members; gitignored
+node aggregator/make-credential.js minh@example.com       # one per member per project
+node aggregator/ingest.js --config aggregator/config.json # resident; notes land here
 ```
+
+One host serves several projects: each repo names itself with `AGENT_KNOWLEDGE_PROJECT`, and their
+inboxes never mix. **Reachable over the internet rather than a LAN?** Then it needs TLS in front and
+`--behind-tls-proxy` — basic auth puts the credential on the wire in reversible form on every note,
+so the server refuses to bind a non-loopback address without it, and refuses entirely without
+`--config` since that mode has no authentication at all.
 
 **2. The project** — once, by whoever owns the repo. Vendor the hooks, commit two config bits.
 
@@ -105,7 +114,21 @@ version named four and said *"only"* — and twelve of the eighteen real `keep` 
 stale belief, a hazard in shared infrastructure, and which module to copy from
 ([`docs/findings.md`](docs/findings.md) §9).
 
-**3. Every member** — `git pull`. That is the entire member-facing surface.
+**3. Every member** — `git pull`, then one file, once:
+
+```bash
+cp hooks/agent-knowledge.env.sample .claude/agent-knowledge.env   # gitignored
+# fill in the two values your tech lead sends you
+```
+
+That is the only manual step, and it is the one place this project keeps a secret on a member's
+machine. Skipping it costs nothing permanent: the hooks spool notes locally and the log names the
+file to create, so the knowledge waits rather than evaporating.
+
+**Identity comes from the credential, not from the note.** The sender still reports its Claude
+account, but the key the `(2 people)` marker counts is the email that authenticated. Otherwise one
+member could assert a second identity and walk an entry through the auto-apply path — the one path
+with no human on it.
 
 Then, whenever you want to propose an update to the shared file:
 
@@ -153,12 +176,29 @@ AGENTS.md in the repo, imported by CLAUDE.md
 teammate's ordinary `git pull`    <- the read path, nothing to install
 ```
 
-Nothing in that path asks a member to run a command, install a tool, or hold a credential. That
-one constraint eliminated four earlier transports: mining the session transcript, shipping notes
-as OTel attributes, and pushing over git — either to a dedicated store or to a ref namespace on
-the project's own origin. Both git routes were built and worked, and both still needed a
-credential to be present and unexpired on that laptop. [`docs/findings.md`](docs/findings.md) has
-what each was measured to do and why it lost.
+Nothing in that path asks a member to run a command or install a tool. The constraint that
+eliminated four earlier transports — mining the session transcript, shipping notes as OTel
+attributes, and pushing over git, either to a dedicated store or to a ref namespace on the project's
+own origin — was stated as "no credential on a member's machine", and it is worth being straight
+about the fact that **a credential is now on a member's machine.** Both git routes were built and
+worked, and both were dropped for needing one. [`docs/findings.md`](docs/findings.md) has what each
+was measured to do.
+
+The reason that is not a reversal is that the two credentials are not comparable, and the original
+constraint was aimed at the wrong noun:
+
+|  | a git credential | this token |
+| --- | --- | --- |
+| what it can do if leaked | push to the repository | append a note to an inbox that a filter and a human then gate |
+| who controls it | the member, and whatever SSO issued it | the tech lead, in `config.json` |
+| how it fails | expires or rotates on its own schedule, silently | revoked deliberately; notes spool and the log names the file to fix |
+| setup | already there, or a support ticket | copy one file, once |
+
+What actually made the git routes unusable was **a credential nobody on the team could see the
+state of**, which turned a silent expiry into a pipeline that had quietly stopped weeks ago. A
+purpose-issued token whose only power is writing to an inbox, and whose absence spools rather than
+discards, is a different object. If the host is on the LAN, none of this is needed — run without
+`--config` and there is no credential at all.
 
 ## What it refuses
 
@@ -306,7 +346,7 @@ Three places, and only the middle one is new infrastructure.
 
 | | What is on it | What it needs |
 | --- | --- | --- |
-| **Member machine ×N** | the repo clone (hooks, `.claude/settings.json`, `AGENTS.md`), the auto-memory directory, the spool | Claude Code, and either a POSIX shell **or** node — both hooks are registered and whichever runtime exists does the work. No credential, no inbound port, no setup step |
+| **Member machine ×N** | the repo clone (hooks, `.claude/settings.json`, `AGENTS.md`), the auto-memory directory, the spool | Claude Code, and either a POSIX shell **or** node — both hooks are registered and whichever runtime exists does the work. No inbound port. One credential file, copied once — and none at all if the host is on the LAN |
 | **Knowledge host ×1** | `ingest.js` on a port, `inbox/`, and `aggregate.js` | node; reachable from member machines; **Claude Code installed and logged in**, because `aggregate.js` runs two model passes via `claude -p` |
 | **Git server** | the repo, and wherever PRs are reviewed | nothing new — no forge API is used |
 
@@ -369,6 +409,10 @@ that do not work, and the numbers proving it.
 | `hooks/parity-test.js` | asserts the two senders deliver byte-identical notes |
 | `hooks/spool-test.js` | asserts either flusher drains either sender's spool |
 | `hooks/settings-snippet.json` | what to commit into the project's `.claude/settings.json` |
+| `hooks/agent-knowledge.env.sample` | the member's one-time copy-and-fill credential file |
+| `aggregator/config.sample.json` | server config — projects, members, credential hashes |
+| `aggregator/make-credential.js` | issues one member credential; prints the config entry and the member's two lines |
+| `aggregator/auth-test.js` | 16 cases over auth — forged identity, cross-project writes, cleartext refusal |
 | `aggregator/ingest.js` | receives notes; refuses unattributable ones and anything carrying a credential |
 | `aggregator/secret-test.js` | 26 cases over the secret scan — 10 refused, 16 that must not be |
 | `aggregator/merge-prompt.md` | the merge pass: sharpen, merge, delete, promote |
@@ -383,7 +427,7 @@ that do not work, and the numbers proving it.
 | `docs/findings.md` | every measurement, including the designs that failed |
 
 ```bash
-npm test                                     # all four suites, no network, no model
+npm test                                     # all five suites, no network, no model
 
 cd eval                                      # these need a model
 node run-eval.js --model opus --runs 3       # the configuration to run in production

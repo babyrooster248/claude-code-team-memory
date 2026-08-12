@@ -10,15 +10,46 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf('--' + n); return i === -1 ? d : argv[i + 1]; };
-const port = parseInt(opt('port', '8791'), 10);
-const out = path.resolve(opt('out', './inbox'));
+const has = n => argv.includes('--' + n);
 
-const notesDir = path.join(out, 'notes');
-fs.mkdirSync(notesDir, { recursive: true });
-const eventsFile = path.join(out, 'events.jsonl');
+// Two modes. With --config the server is multi-project and authenticated, which is what a host
+// reachable over the internet needs. Without it, the single-project unauthenticated form is kept
+// for local development and for the test suites, and refuses to leave loopback.
+const configPath = opt('config', null);
+const config = configPath ? JSON.parse(fs.readFileSync(path.resolve(configPath), 'utf8')) : null;
+
+const port = parseInt(opt('port', config ? String(config.port || 8791) : '8791'), 10);
+const bind = opt('bind', config ? (config.bind || '127.0.0.1') : '127.0.0.1');
+
+// Basic auth transmits the credential on every request in a form that is trivially reversible, so
+// serving it over plain HTTP hands every note's credential to anything on the path. Refusing to
+// start is the only version of this warning nobody can skip.
+const LOOPBACK = /^(127\.|::1$|localhost$)/;
+if (!LOOPBACK.test(bind) && !has('behind-tls-proxy')) {
+  console.error(`[ingest] refusing to bind ${bind}: basic auth over plain HTTP puts member ` +
+    `credentials in cleartext on the wire.\n` +
+    `         Terminate TLS in front of this process and pass --behind-tls-proxy, ` +
+    `or bind 127.0.0.1 and reach it through a tunnel.`);
+  process.exit(2);
+}
+if (!config && !LOOPBACK.test(bind)) {
+  console.error('[ingest] refusing to bind ' + bind + ' without --config: the single-project mode has no authentication.');
+  process.exit(2);
+}
+
+// Resolved per project in config mode; the legacy flags stand in for a single unnamed project.
+function projectPaths(p) {
+  const base = path.resolve(config ? p.out : opt('out', './inbox'));
+  const notes = path.join(base, 'notes');
+  fs.mkdirSync(notes, { recursive: true });
+  return { out: base, notesDir: notes, eventsFile: path.join(base, 'events.jsonl') };
+}
+
+const LEGACY = config ? null : projectPaths(null);
 
 // A deterministic scan, running before anything else looks at the note.
 //
@@ -134,13 +165,14 @@ function validate(n) {
   return null;
 }
 
-function readEvents() {
+function readEvents(eventsFile) {
   if (!fs.existsSync(eventsFile)) return [];
   return fs.readFileSync(eventsFile, 'utf8').split('\n').filter(Boolean)
     .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
 }
 
-function accept(n) {
+function accept(n, paths) {
+  const { notesDir, eventsFile } = paths;
   // Re-create the directory rather than assuming it survived since startup. Anything that
   // tidies the inbox — a cleanup script, an operator, a test — would otherwise make every
   // subsequent note fail, and the sender only sees a 5xx it will spool and retry forever.
@@ -150,7 +182,7 @@ function accept(n) {
   const local = `${who}__${base}`;
   fs.writeFileSync(path.join(notesDir, local), n.content);
 
-  const events = readEvents();
+  const events = readEvents(eventsFile);
 
   // One person arriving under two different keys is the one way the contributor count
   // can silently inflate, and a shared label with a different key is the detectable
@@ -162,6 +194,23 @@ function accept(n) {
                   `They will count as two people and can promote an entry on their own.`);
   }
 
+  // Authentication removes the old mixing hazard — one credential is one key — and leaves a new
+  // one in its place: one person holding two issued credentials still counts as two people. The
+  // signature is the same Claude account arriving under two authenticated emails, and the account
+  // is something the sender reports rather than proves, so this is a flag for a human, not a block.
+  //
+  // Limitation, measured by writing the test that assumed otherwise: only the latest event per
+  // (contributor, note) is kept, so the signature is visible only while both credentials' most
+  // recent notes still carry the shared account. It catches the careless case, not a patient one.
+  if (n.identity_claimed) {
+    const twin = events.find(e => e.claimed && e.claimed === n.identity_claimed && e.user !== n.identity_key);
+    if (twin) {
+      console.error(`[ingest] WARNING one Claude account, two credentials: ${n.identity_claimed} has ` +
+                    `authenticated as both ${twin.user} and ${n.identity_key}. If that is one person, ` +
+                    `they can promote an entry alone — revoke one credential in config.json.`);
+    }
+  }
+
   // One row per (person, note). A later snapshot of the same note replaces the older
   // row instead of inflating the count — the same person writing twice is one person.
   const kept = events.filter(e => !(e.user === n.identity_key && path.basename(String(e.file).replace(/\\/g, '/')) === local));
@@ -169,6 +218,7 @@ function accept(n) {
     user: n.identity_key,
     label: n.identity_label || null,
     source: n.identity_source || null,
+    claimed: n.identity_claimed || null,
     session: n.session_id || 'unknown',
     ts: n.ts || new Date().toISOString(),
     file: `/${who}/${local}`,
@@ -203,14 +253,55 @@ function fromHeaders(req, body) {
   };
 }
 
+// Returns the authenticated member and their project, or a reason to refuse. Every failure gets
+// the same 401 body: distinguishing "no such project" from "no such member" from "wrong token"
+// tells an outsider which of the three they guessed right.
+function authenticate(req) {
+  if (!config) return { paths: LEGACY, email: null };
+
+  const projectId = String(req.headers['x-project'] || '').trim();
+  const header = String(req.headers.authorization || '');
+  const m = /^Basic\s+(.+)$/i.exec(header);
+  if (!m) return { fail: 'missing Basic authorization', challenge: true };
+
+  let decoded = '';
+  try { decoded = Buffer.from(m[1], 'base64').toString('utf8'); } catch { return { fail: 'unreadable credential' }; }
+  const cut = decoded.indexOf(':');
+  if (cut < 1) return { fail: 'malformed credential' };
+  const email = decoded.slice(0, cut).toLowerCase();
+  const token = decoded.slice(cut + 1);
+
+  const project = config.projects && config.projects[projectId];
+  const member = project && project.members && project.members[email];
+  if (!project || !member) {
+    // Still hash something, so a wrong email does not answer faster than a wrong token.
+    crypto.scryptSync(token || 'x', 'timing', 32);
+    return { fail: 'not authorised for this project' };
+  }
+
+  const got = crypto.scryptSync(token, String(member.salt), 32);
+  const want = Buffer.from(String(member.hash), 'hex');
+  if (got.length !== want.length || !crypto.timingSafeEqual(got, want)) {
+    return { fail: 'not authorised for this project' };
+  }
+  return { paths: projectPaths(project), email, projectId };
+}
+
 http.createServer((req, res) => {
-  const send = (code, obj) => {
-    res.writeHead(code, { 'Content-Type': 'application/json' });
+  const send = (code, obj, headers) => {
+    res.writeHead(code, Object.assign({ 'Content-Type': 'application/json' }, headers || {}));
     res.end(JSON.stringify(obj));
   };
 
   if (req.method === 'GET' && req.url.startsWith('/health')) return send(200, { ok: true });
   if (req.method !== 'POST' || !req.url.startsWith('/note')) return send(404, { error: 'not found' });
+
+  const auth = authenticate(req);
+  if (auth.fail) {
+    console.error(`[ingest] 401 (${auth.fail}) from ${req.socket.remoteAddress}`);
+    return send(401, { error: 'not authorised' },
+      auth.challenge ? { 'WWW-Authenticate': 'Basic realm="agent-knowledge"' } : {});
+  }
 
   const chunks = [];
   req.on('data', c => chunks.push(c));
@@ -218,15 +309,30 @@ http.createServer((req, res) => {
     const raw = Buffer.concat(chunks).toString('utf8');
     const note = fromHeaders(req, raw);
 
+    // Identity comes from the credential, never from the note. The sender still reports its Claude
+    // account, and that stays as a label, but the key the promotion rule counts is the email that
+    // authenticated. A self-asserted key would let one member forge a second contributor and walk
+    // an entry through the auto-apply path — the one path with no human on it.
+    if (auth.email) {
+      note.identity_claimed = note.identity_key;
+      note.identity_key = auth.email;
+      note.identity_label = auth.email;
+      note.identity_source = 'basic-auth';
+    }
+
     const bad = validate(note);
     if (bad) {
       console.error(`[ingest] REFUSED (${bad}) — wire body was ${raw.length} bytes`);
       return send(422, { error: bad });
     }
 
-    const r = accept(note);
-    console.error(`[ingest] accepted ${r.local} — ${r.bytes} bytes of note, ` +
-                  `wire body ${raw.length} bytes, ${r.people} contributor(s) so far`);
+    const r = accept(note, auth.paths);
+    console.error(`[ingest] accepted ${r.local}${auth.projectId ? ' [' + auth.projectId + ']' : ''} — ` +
+                  `${r.bytes} bytes of note, wire body ${raw.length} bytes, ` +
+                  `${r.people} contributor(s) so far`);
     send(200, { ok: true, stored: r.local, bytes: r.bytes });
   });
-}).listen(port, () => console.error(`[ingest] listening on ${port}, writing ${out}`));
+}).listen(port, bind, () => console.error(
+  `[ingest] listening on ${bind}:${port} — ` +
+  (config ? `${Object.keys(config.projects || {}).length} project(s), Basic auth required`
+          : `single project, NO AUTH, ${LEGACY.out}`)));

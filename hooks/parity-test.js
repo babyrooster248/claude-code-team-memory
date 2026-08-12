@@ -51,7 +51,16 @@ function fire(runner, file) {
     : [process.execPath, [path.join(__dirname, 'post-note.js')]];
   return spawnSync(cmd, args, {
     input: payload,
-    env: { ...process.env, AGENT_KNOWLEDGE_INGEST: `http://127.0.0.1:${PORT}` },
+    // A credential, because both senders now spool instead of sending without one. Supplied
+    // through the environment rather than a file so this test stays about wire-format parity;
+    // auth-test.js is where the credential path itself is exercised.
+    env: {
+      ...process.env,
+      AGENT_KNOWLEDGE_INGEST: `http://127.0.0.1:${PORT}`,
+      AGENT_KNOWLEDGE_USER: 'parity@example.com',
+      AGENT_KNOWLEDGE_TOKEN: 'parity-token',
+      AGENT_KNOWLEDGE_PROJECT: 'parity-project',
+    },
   }).status;
 }
 

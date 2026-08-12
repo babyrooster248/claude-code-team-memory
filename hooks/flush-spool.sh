@@ -21,6 +21,31 @@ ingest="${AGENT_KNOWLEDGE_INGEST:-}"
 [ -d "$SPOOL" ] || exit 0
 ingest="${ingest%/}"
 
+# Read at send time, never replayed from the spool — the spool deliberately holds no credential.
+ak_user="${AGENT_KNOWLEDGE_USER:-}"
+ak_token="${AGENT_KNOWLEDGE_TOKEN:-}"
+d="${CLAUDE_PROJECT_DIR:-$PWD}"
+i=0
+while [ "$i" -lt 24 ]; do
+  f="$d/.claude/agent-knowledge.env"
+  if [ -f "$f" ]; then
+    [ -n "$ak_user" ] || ak_user="$(sed -n 's/^[[:space:]]*AGENT_KNOWLEDGE_USER[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$f" | tr -d '\r' | head -1)"
+    [ -n "$ak_token" ] || ak_token="$(sed -n 's/^[[:space:]]*AGENT_KNOWLEDGE_TOKEN[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$f" | tr -d '\r' | head -1)"
+  fi
+  [ -n "$ak_user" ] && [ -n "$ak_token" ] && break
+  up="$(dirname "$d")"
+  [ "$up" = "$d" ] && break
+  d="$up"
+  i=$((i + 1))
+done
+
+# Leave the spool alone rather than spend it on 401s. Waiting for a setup step is recoverable.
+if [ -z "$ak_user" ] || [ -z "$ak_token" ]; then
+  log "no credential — leaving spool untouched; copy hooks/agent-knowledge.env.sample to .claude/agent-knowledge.env"
+  exit 0
+fi
+auth="Basic $(printf '%s:%s' "$ak_user" "$ak_token" | base64 | tr -d '\n\r')"
+
 n=0
 attempted=0
 for head in "$SPOOL"/*.head; do
@@ -45,13 +70,17 @@ for head in "$SPOOL"/*.head; do
 
   attempted=$((attempted + 1))
   code="$(cat "$body" | curl -sS -o /dev/null -w '%{http_code}' --max-time 3 -X POST \
-    --data-binary @- -H "Content-Type: text/markdown; charset=utf-8" "$@" \
+    --data-binary @- -H "Content-Type: text/markdown; charset=utf-8" \
+    -H "Authorization: $auth" "$@" \
     "$ingest/note" 2>/dev/null)" || code="000"
 
   case "$code" in
     2*) rm -f "$head" "$body"; log "$id: delivered" ;;
-    # 4xx means the endpoint judged it unacceptable and always will, so keeping it would
-    # retry the same rejection at the start of every session from now on.
+    # 401 and 403 are kept. Before auth existed every 4xx meant "unacceptable forever", so
+    # discarding was right; now the commonest 4xx is a credential problem, and discarding on it
+    # would burn the whole spool over a config error.
+    401|403) log "$id: kept ($code, check credential)" ;;
+    # Any other 4xx is still a verdict on the note itself, which retrying cannot change.
     4*) rm -f "$head" "$body"; log "$id: refused $code, discarded" ;;
     *)  log "$id: kept (http $code)" ;;
   esac
