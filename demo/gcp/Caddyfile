@@ -1,0 +1,23 @@
+# Caddy in front of the ingest endpoint. Copy to /etc/caddy/Caddyfile and replace the hostname.
+#
+# Replace <IP-WITH-DASHES> with the host's external IPv4, dashes for dots: 203.0.113.9 becomes
+# 203-0-113-9. sslip.io resolves that name to that address, so Let's Encrypt issues for it over
+# HTTP-01 with no domain to buy and no DNS account to create.
+#
+# Reserve the address as static FIRST. The hostname embeds the IP, so an ephemeral address that
+# changes on stop/start silently invalidates every AGENT_KNOWLEDGE_INGEST already committed to a
+# project's .claude/settings.json — and the symptom is every member's hook spooling with nobody
+# noticing. On GCP: gcloud compute addresses create <name> --addresses <ip> --region <region>.
+#
+# Why a real certificate and not self-signed: basic auth sends the member credential on every note
+# in a reversible form. A client that cannot verify the certificate has to be told to stop
+# verifying, and that switch lives in the hook's environment — in a committed settings.json — so it
+# would travel to the whole team by git pull. See the README section on authentication.
+
+<IP-WITH-DASHES>.sslip.io {
+	# The endpoint binds 127.0.0.1, so nothing but this proxy can reach it. That is deliberate twice
+	# over: a wrong firewall rule cannot expose the node process, and a loopback bind means the
+	# operator never has to assert --behind-tls-proxy, which is a promise the endpoint has no way to
+	# check.
+	reverse_proxy 127.0.0.1:8791
+}

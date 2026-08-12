@@ -1,0 +1,29 @@
+# Copy to ~/.config/systemd/user/agent-knowledge-ingest.service, then:
+#
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now agent-knowledge-ingest
+#   sudo loginctl enable-linger "$USER"     # or it dies when your SSH session closes
+#
+# A user service rather than a system one: the endpoint needs no privileged port, and the account
+# that runs it is the account Claude Code is logged in as — which aggregate.js needs when the trigger
+# launches it. Linger is what makes it survive logout and reboot.
+
+[Unit]
+Description=agent-knowledge ingest endpoint (claude-code-team-memory)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node %h/claude-code-team-memory/aggregator/ingest.js --config %h/config.json
+Restart=always
+RestartSec=5
+
+# PATH is set explicitly because aggregate.js spawns `claude`, and a systemd user service does not
+# inherit a login shell's PATH. Without this the trigger fires, the run starts, and every model call
+# dies with ENOENT — which reads like the model being unavailable rather than like a missing PATH.
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=%h
+
+[Install]
+WantedBy=default.target
