@@ -5,6 +5,14 @@
   "bind": "127.0.0.1",
   "port": 8791,
 
+  "_rateLimit": "Two buckets. notesPerHour/burst is per credential and is a backstop against runaway cost, not a throttle on people — every note costs three model calls downstream, so a hook stuck in a loop or one leaked token can spend a month's budget before anyone looks. authAttemptsPerHour/authBurst is per address and sits BEFORE authentication, because verifying a credential runs scrypt on purpose: without it, an unauthenticated flood buys one deliberately-expensive hash per request and the timing-safety measure becomes a way to exhaust the CPU. Both are generous: a member having a heavy day must never be the reason a trap goes unrecorded.",
+  "rateLimit": {
+    "notesPerHour": 120,
+    "burst": 30,
+    "authAttemptsPerHour": 600,
+    "authBurst": 60
+  },
+
   "_projects": "One server, many projects. The key is the project id, which each repo states in its own .claude/settings.json as AGENT_KNOWLEDGE_PROJECT — that value is not a secret and is committed with the repo. Notes for different projects never share an inbox.",
   "projects": {
     "catalog-svc": {

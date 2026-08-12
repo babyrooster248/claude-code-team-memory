@@ -260,20 +260,29 @@ function fromHeaders(req, body) {
 //
 // Deliberately generous. This is a backstop against runaway cost, not a throttle on people: a
 // member having a heavy day should never be the reason a trap goes unrecorded.
-const RATE = Object.assign({ notesPerHour: 120, burst: 30 },
+const RATE = Object.assign({ notesPerHour: 120, burst: 30, authAttemptsPerHour: 600, authBurst: 60 },
   (config && config.rateLimit) || {});
 const buckets = new Map();
-function overLimit(key) {
+function overLimit(key, perHour, burst) {
   const now = Date.now();
-  const refillPerMs = RATE.notesPerHour / 3600000;
-  const b = buckets.get(key) || { tokens: RATE.burst, last: now };
-  b.tokens = Math.min(RATE.burst, b.tokens + (now - b.last) * refillPerMs);
+  const refillPerMs = perHour / 3600000;
+  const b = buckets.get(key) || { tokens: burst, last: now };
+  b.tokens = Math.min(burst, b.tokens + (now - b.last) * refillPerMs);
   b.last = now;
   if (b.tokens < 1) { buckets.set(key, b); return true; }
   b.tokens -= 1;
   buckets.set(key, b);
   return false;
 }
+
+// A second, looser bucket in front of authentication, keyed by address.
+//
+// Not for guessing: the tokens are 24 random bytes. This exists because verifying a credential runs
+// scrypt, deliberately, and an unauthenticated flood therefore buys one expensive hash per request —
+// the check added to make wrong credentials slow became a way to exhaust the CPU. Rejecting before
+// the hash is the fix, and it has to sit before authenticate() rather than after, because a 401
+// returned after the work is done has already paid for it.
+const overAuthLimit = addr => overLimit('auth:' + addr, RATE.authAttemptsPerHour, RATE.authBurst);
 
 // Returns the authenticated member and their project, or a reason to refuse. Every failure gets
 // the same 401 body: distinguishing "no such project" from "no such member" from "wrong token"
@@ -318,6 +327,12 @@ http.createServer((req, res) => {
   if (req.method === 'GET' && req.url.startsWith('/health')) return send(200, { ok: true });
   if (req.method !== 'POST' || !req.url.startsWith('/note')) return send(404, { error: 'not found' });
 
+  const addr = String(req.socket.remoteAddress);
+  if (config && overAuthLimit(addr)) {
+    console.error(`[ingest] 429 too many auth attempts from ${addr}`);
+    return send(429, { error: 'rate limited, retry later' }, { 'Retry-After': '600' });
+  }
+
   const auth = authenticate(req);
   if (auth.fail) {
     console.error(`[ingest] 401 (${auth.fail}) from ${req.socket.remoteAddress}`);
@@ -327,8 +342,8 @@ http.createServer((req, res) => {
 
   // 429 rather than a silent drop, and the senders spool on it: a rate limit is meant to delay
   // knowledge, never to destroy it.
-  const rateKey = auth.email ? `${auth.projectId}:${auth.email}` : String(req.socket.remoteAddress);
-  if (overLimit(rateKey)) {
+  const rateKey = auth.email ? `${auth.projectId}:${auth.email}` : addr;
+  if (overLimit(rateKey, RATE.notesPerHour, RATE.burst)) {
     console.error(`[ingest] 429 rate limited ${rateKey} — ${RATE.notesPerHour}/hour, burst ${RATE.burst}`);
     return send(429, { error: 'rate limited, retry later' }, { 'Retry-After': '600' });
   }

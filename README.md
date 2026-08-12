@@ -321,6 +321,23 @@ hook stuck in a loop, or one leaked token, spending a month's budget before anyo
 120 notes/hour per credential with a burst of 30, configurable, generous on purpose — a member having
 a heavy day must never be the reason a trap goes unrecorded.
 
+There are two buckets, and the second one exists because adding authentication created the problem it
+solves. Verifying a credential runs scrypt, deliberately, and wrong credentials are hashed too so
+that a bad email cannot be told apart from a bad token by how fast the refusal comes back. Those two
+choices together mean an unauthenticated flood buys one expensive hash per request: the measure added
+to slow down guessing became a way to exhaust the CPU. So a looser per-address bucket sits **in front
+of** authentication — the position is the whole point, since a 401 returned after the hash has
+already paid for it.
+
+**Current state, both modes:**
+
+| | with `--config` | without `--config` |
+| --- | --- | --- |
+| authentication | required | none |
+| rate limit on notes | per credential | per address |
+| rate limit before auth | per address | not applicable |
+| what it will bind | loopback, or anything with `--behind-tls-proxy` | **loopback only** |
+
 One trap worth naming, because getting it wrong would have made the rate limit worse than useless:
 **429 is a 4xx**, and every sender used to discard 4xx as "unacceptable forever". A rate limit that
 discarded notes would be a cost control that destroys knowledge. Both senders and both flushers now
@@ -453,7 +470,7 @@ that do not work, and the numbers proving it.
 | `hooks/agent-knowledge.env.sample` | the member's one-time copy-and-fill credential file |
 | `aggregator/config.sample.json` | server config — projects, members, credential hashes |
 | `aggregator/make-credential.js` | issues one member credential; prints the config entry and the member's two lines |
-| `aggregator/auth-test.js` | 18 cases over auth and rate limiting — forged identity, cross-project writes, 429 handling, cleartext refusal |
+| `aggregator/auth-test.js` | 19 cases over auth and rate limiting — forged identity, cross-project writes, 429 handling, cleartext refusal |
 | `aggregator/ingest.js` | receives notes; refuses unattributable ones and anything carrying a credential |
 | `aggregator/secret-test.js` | 26 cases over the secret scan — 10 refused, 16 that must not be |
 | `aggregator/merge-prompt.md` | the merge pass: sharpen, merge, delete, promote |

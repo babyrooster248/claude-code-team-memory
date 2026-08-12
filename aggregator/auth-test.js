@@ -93,6 +93,8 @@ const events = (dir) => {
     console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(52)} → ${got} (want ${want})`);
   };
 
+  // Order matters: these must run before the flood cases below, because the pre-auth bucket is
+  // keyed by address and every case in this file comes from the same one.
   check('no Authorization header', await send({ project: 'catalog-svc' }), 401);
   check('wrong token', await send({ auth: basic(minh.email, 'nope'), project: 'catalog-svc' }), 401);
   check('unknown email', await send({ auth: basic('ghost@example.com', minh.token), project: 'catalog-svc' }), 401);
@@ -133,6 +135,15 @@ const events = (dir) => {
   check('a different member is not limited by it',
     await send({ auth: basic(minh.email, minh.token), project: 'catalog-svc' }), 200);
 
+  // Verifying a credential runs scrypt on purpose, so an unauthenticated flood buys one expensive
+  // hash per request unless something rejects it before the hash. This asserts the pre-auth bucket
+  // exists at all: without it every one of these returns 401 and every one of them costs a scrypt.
+  let refusedBeforeAuth = 0;
+  for (let i = 0; i < 80; i++) {
+    if (await send({ auth: basic('flood@example.com', 'wrong'), project: 'catalog-svc' }) === 429) refusedBeforeAuth++;
+  }
+  check('bad-credential flood is capped before scrypt runs', refusedBeforeAuth > 0, true);
+
   server.kill();
 
   // A non-loopback bind without TLS in front must refuse to start rather than serve credentials
@@ -143,7 +154,7 @@ const events = (dir) => {
   check('refuses 0.0.0.0 without --behind-tls-proxy', r.status, 2);
   check('and says why', /cleartext/.test(r.stderr), true);
 
-  const total = 18;
+  const total = 19;
   console.log(fails ? `\n${fails}/${total} case(s) failed` : `\n${total}/${total} passed`);
   fs.rmSync(tmp, { recursive: true, force: true });
   process.exit(fails ? 1 : 0);
