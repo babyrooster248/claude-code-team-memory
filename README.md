@@ -89,11 +89,21 @@ all, and it is measured to matter (0/3 sessions without it, 2/2 with it):
 
 ## Recording memory
 
-When a command fails and then works, when I correct you, or when you hit a trap that is not
-visible in the code — write it into auto memory before finishing the turn. Only four kinds:
-what not to touch and why; what was tried and abandoned; what has broken before; which of two
-similar things is the source of truth. Add one line to MEMORY.md.
+Write it into auto memory whenever you learn something a teammate would want and the code does
+not say: a command failed and then worked; I corrected you; something behaved in a way whose
+real cause was not what it looked like; you chose or rejected an approach for a reason; you
+worked out which of two similar things governs; you found an existing note is now wrong. Do it
+before finishing the turn, including when you finish by asking me something. Err on the side of
+writing it — a shared filter drops what does not belong, and nothing recovers what was never
+written. Add one line to MEMORY.md.
 ```
+
+Recall is the job here, not precision: over-capture costs one filter pass on the aggregator, at 100%
+measured precision, and under-capture is permanent. Hence no closed list of categories. An earlier
+version named four and said *"only"* — and twelve of the eighteen real `keep` cases in
+`eval/cases.jsonl` fit none of the four, including three shapes it never mentioned: a correction of a
+stale belief, a hazard in shared infrastructure, and which module to copy from
+([`docs/findings.md`](docs/findings.md) §9).
 
 **3. Every member** — `git pull`. That is the entire member-facing surface.
 
@@ -113,7 +123,7 @@ Without `--commit` nothing is touched: the proposal lands beside the artifact as
 ```
 session on a member's machine
   |   agent writes its own memory note, in-session, where the context is
-  |   (the five CLAUDE.md lines above are what make it do this)
+  |   (the CLAUDE.md instruction above is what makes it do this)
   |
   +-- PostToolUse hook, matcher Write|Edit
   |     is the path inside the memory directory?  no -> exit, one string compare
@@ -226,8 +236,8 @@ cases, majority of 3 votes. Full method and the failed designs are in
 | What | Result |
 | --- | --- |
 | Agents saving knowledge, no `CLAUDE.md` instruction | **0 / 3** sessions |
-| Agents saving knowledge, 5-line instruction | **2 / 2** sessions |
-| The 5-line instruction vs a longer rewrite, 7 planted classes | **indistinguishable** — p = 0.234 unpinned, p = 1.000 on opus |
+| Agents saving knowledge, with the instruction | **2 / 2** sessions |
+| Short instruction vs a longer rewrite, 7 planted classes | **indistinguishable** — p = 0.234 unpinned, p = 1.000 on opus |
 | Notes that are machine-local rather than project knowledge | **1 in 3** |
 | Intake filter on **opus**, 29 cases, majority of 3 | **100%** accuracy / precision / recall, 0 unstable |
 | Same prompt on **haiku** | 89.7% accuracy, 94.1% precision, 88.9% recall — 1 junk through |
@@ -361,12 +371,14 @@ find them:
   recall on sonnet with the prompt untouched, so upgrading, downgrading or switching the model is a
   change to the filter and has to be re-measured. Pin the model you run.
 
-- **`"before finishing the turn"` does not fire when the turn ends in a question.** Measured: a
-  session worked out a do-not-touch rule, wrote three paragraphs of correct analysis about it, ended
-  by asking which of two options to take, and recorded nothing — while the knowledge was settled
-  regardless of the answer. A one-clause fix is obvious and is deliberately not applied, because a
-  rewrite of these five lines was measured against the current one and came out indistinguishable
-  (`docs/findings.md` §9). Guessing is how the last figure in this README went stale.
+- **The capture instruction is tuned for recall, and that side of it is unmeasured.** A longer
+  rewrite was measured against the previous version and came out indistinguishable on seven planted
+  classes (`docs/findings.md` §9). Two changes were made anyway, on evidence the A/B could not
+  produce: the closed list of four categories was opened, because twelve of the eighteen real `keep`
+  cases in `eval/cases.jsonl` fit none of the four; and it now fires on a turn that ends in a
+  question, because a session settled a do-not-touch rule, wrote three paragraphs about it, asked
+  which option to take, and recorded nothing. Neither change has an A/B behind it — planting a class
+  nobody thought of is not possible, which is exactly why the enumeration was the risk.
 
 Also known and documented: a line that was true, that the code has since made false, and that
 nobody hits again, has no trigger to correct it. The only mitigation is keeping the file small and

@@ -731,6 +731,41 @@ Two further reasons not to adopt the rewrite, both measured rather than argued:
   the linter never went red. No discovery event, nothing to record. The design flaw is in the
   sandbox, and the class is left visibly unmeasured in the table rather than dropped to tidy it.
 
+### The word the A/B could not test: "only"
+
+The experiment above scores the seven classes that were planted. It therefore measures recall
+against a list its author wrote, and says nothing about knowledge outside any list — which is the
+failure that actually matters, because the aggregator's filter can only reject what was written and
+cannot recover what was not.
+
+The instruction was `Only four kinds: what not to touch and why; what was tried and abandoned; what
+has broken before; which of two similar things is the source of truth.` That word `Only` is a
+precision device, and it sits in the one place where precision is not wanted: a false positive costs
+one filter pass at 100% measured precision, and a false negative is permanent.
+
+Checked against the 18 `keep` cases in `eval/cases.jsonl` — real notes from a six-month codebase, no
+model calls needed:
+
+| Verdict | Cases |
+| --- | --- |
+| fits a named kind | `proj-03`, `proj-04`, `proj-06`, `force-01` |
+| fits only by stretching one | `proj-02`, `proj-05` |
+| **fits none of the four** | `proj-01`, `proj-07`, `proj-09`, `proj-10`, `proj-14`, `proj-15`, `proj-16`, `proj-18`, `proj-19`, `force-03`, `pref-01`, `pref-02` |
+
+**Twelve of eighteen fall outside the enumeration**, including three whole shapes it never names: a
+correction of a stale belief, a hazard in shared infrastructure, and which module to copy from. The
+classification is a judgement and the stretched pair is marked as such, but the direction is not
+close enough for the judgement calls to matter.
+
+So the list was replaced with an open one and the closing suppression removed. This is justified by
+argument and by the table above, **not** by the A/B — which could not test it, by construction, since
+planting a class one has not thought of is not possible. The distinction is worth keeping straight:
+adding a clause that claims to improve capture needs a measurement, and deleting a clause that tells
+the agent to stop capturing does not.
+
+The same change carries the `"before finishing the turn"` fix, now that recall is the stated
+objective rather than a thing to be weighed against instruction length.
+
 ### What it cost, which is itself the finding
 
 Every observation here is a full agent session of about 130 seconds doing real work, where an
