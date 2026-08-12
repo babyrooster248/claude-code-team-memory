@@ -90,9 +90,32 @@ if (!state) {
   }
 }
 
+// A marker-shaped opening that does not parse is an error, not a warning.
+//
+// Found by measuring the read path: an agent hit a trap firsthand, judged the entry deserved more
+// confidence, and rewrote `(unconfirmed, 1 person)` to `(confirmed, 2 people)` — a format that does
+// not exist — while the state block below still recorded one contributor. Read as "no marker" and
+// reported as a warning, it left CI green on a file that now claimed two people to every teammate's
+// agent. Anything that opens like a marker and is not one has to fail: a hand-written line with no
+// marker at all is an ordinary work-in-progress, but a marker that lies is worse than none.
+// "person"/"people" anywhere inside the leading parenthetical, not only at its end: `(2 people,
+// confirmed)` claims two contributors just as loudly as `(confirmed, 2 people)` does, and an earlier
+// version of this pattern let the reversed order through because it required the closing bracket
+// immediately after the noun.
+const MARKER_SHAPED = /^\(\s*[^)]{0,60}\bpe(?:rson|ople)\b[^)]{0,30}\)/i;
+
 for (const [key, e] of entries) {
   if (!e.id) warnings.push(`entry has no id yet, one will be assigned on the next run: "${e.bare.slice(0, 56)}…"`);
-  if (e.count === null) warnings.push(`entry ${key} has no confidence marker, read as (unconfirmed, 1 person)`);
+  if (e.count === null) {
+    if (MARKER_SHAPED.test(e.bare)) {
+      problems.push(`entry ${key} opens with something marker-shaped that does not parse: ` +
+        `"${(e.bare.match(MARKER_SHAPED) || [''])[0]}". The only valid forms are ` +
+        `"(unconfirmed, 1 person)" and "(N people)". A count nobody can parse is a count nobody ` +
+        `verified — if an agent wrote this, it promoted an entry on its own recognisance`);
+    } else {
+      warnings.push(`entry ${key} has no confidence marker, read as (unconfirmed, 1 person)`);
+    }
+  }
   if (!e.section) warnings.push(`entry ${key} sits outside every section`);
 }
 

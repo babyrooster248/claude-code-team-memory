@@ -882,6 +882,68 @@ One operational note that is not about this code but will bite anyone running th
 port and the next start dies with `EADDRINUSE`. `Get-NetTCPConnection -LocalPort <port> -State Listen`
 piped into `Stop-Process` is what actually works.
 
+## 11. Shared knowledge is cheaper, not just faster — and the artifact invited agents to edit it
+
+The claim the whole project rests on had never been measured: does an agent that reads the team's
+artifact actually cost less, or does it merely feel better? It is not obvious. The warm arm reads an
+extra file on every session, so it starts each run behind on input tokens, and only wins if the
+wasted exploration it prevents costs more than the file it adds.
+
+Two clones of the same generated project, same task, same model, `opus` on `claude` 2.1.228, three
+runs per arm, each run with a **fresh** memory directory so one run cannot read what another wrote.
+"Tripped the trap" is read from an invocation log the project's own scripts append to, never from the
+model's prose — an agent that says it ran the migration first and did not would otherwise be scored
+on its description instead of its behaviour. Reproduce with `node demo/measure.js --runs 3`.
+
+| | cold (`AGENTS.md` empty) | warm (entry present) | delta |
+| --- | --- | --- | --- |
+| tripped the trap | **3 / 3** | **1 / 3** | |
+| turns | 16.7 | 12.3 | **−26.0%** |
+| output tokens | 3 803 | 3 159 | −16.9% |
+| cache read tokens | 213 684 | 146 817 | **−31.3%** |
+| cost USD | 0.3329 | 0.2740 | **−17.7%** |
+| wall seconds | 67.0 | 52.3 | −22.0% |
+
+**The distributions do not overlap.** Cold cost 0.3253 / 0.3366 / 0.3367; warm cost 0.2659 / 0.2664 /
+0.2898. Every warm run was cheaper than every cold run, which at n=3 says more than a p-value would.
+
+The mechanism is worth stating because it is the opposite of the intuition that shared context costs
+context: **input tokens rose (24 → 67) and total spend fell.** Every additional turn replays the
+conversation, so the saving comes from the four turns that never happen, and it is an order of
+magnitude larger than the file that prevented them. The `cache read` column is where it shows.
+
+Trap avoidance is the weaker of the two claims: **2 of 3**, not always. One warm run read the entry
+and ran `seed.js` first anyway. Reading is not acting, and a task phrased "get the seed data loaded"
+makes `seed.js` the obvious opening move. So a demo built on "the warm agent avoids the trap" has
+roughly a one-in-three chance of being contradicted live, while "it costs less and finishes sooner"
+held in 3 of 3.
+
+### The header was telling agents to edit the artifact
+
+Found on the very first measurement run, and worse than anything the numbers say. The warm agent
+edited `AGENTS.md` and announced it:
+
+> *"`AGENTS.md` had this trap logged as `(unconfirmed, 1 person)`. I hit it firsthand, so I updated
+> the marker to `(confirmed, 2 people)`."*
+
+On disk: the marker rewritten to a format that does not exist, while `knowledge-state` below still
+recorded one contributor. Counts here come from verified credentials — that is what the whole
+authentication design is for — and an agent promoting an entry on its own recognisance defeats it.
+
+The cause was a sentence written for the wrong reader. The header opened with *"Edit freely: delete a
+line you disagree with"*, addressed to the reviewer looking at a pull request. **This file has two
+audiences, and one of them acts on instructions written for the other.** The header now addresses
+them separately: agents are told not to edit it and to write to their own memory instead, so the
+pipeline counts them; reviewers are still told to edit freely.
+
+`check-artifact.js` did not save it either. `(confirmed, 2 people)` failed the marker pattern, was
+read as "no marker", and reported as a **warning** — so CI stayed green on a file that now claimed two
+people to every teammate's agent. A marker-shaped opening that does not parse is now an **error**: a
+hand-written line with no marker at all is ordinary work in progress, but a marker that lies is worse
+than no marker. `aggregator/artifact-check-test.js` covers it in 11 cases, and caught the first
+version of that pattern letting `(2 people, confirmed)` through because it required the closing
+bracket immediately after the noun.
+
 ## Designs that failed
 
 **Mining the transcript for moments something went wrong.** Parse the session transcript at `SessionEnd`,
