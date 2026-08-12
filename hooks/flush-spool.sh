@@ -21,6 +21,30 @@ ingest="${AGENT_KNOWLEDGE_INGEST:-}"
 [ -d "$SPOOL" ] || exit 0
 ingest="${ingest%/}"
 
+# Bound the spool, before the credential check for the same reason the node flusher does: a member
+# who never copies the env file is the longest-lived version of this state. Loud on every discard —
+# a dropped note is one nobody will ever read.
+MAX_ENTRIES=500
+MAX_AGE_DAYS=30
+prune_one() {
+  id="$(basename "$1" .head)"
+  rm -f "$1" "${1%.head}.body"
+  log "DISCARDED $id — $2. The endpoint has been unreachable or refusing for a long time; this note is lost."
+}
+# `find -mtime` rather than comparing dates in shell: no arithmetic on timestamps, and it is the one
+# spelling that behaves the same on GNU and BSD find.
+find "$SPOOL" -name '*.head' -mtime +$MAX_AGE_DAYS 2>/dev/null | while IFS= read -r old; do
+  [ -f "$old" ] && prune_one "$old" "undelivered for over $MAX_AGE_DAYS days"
+done
+count=0
+for f in "$SPOOL"/*.head; do [ -f "$f" ] && count=$((count + 1)); done
+if [ "$count" -gt "$MAX_ENTRIES" ]; then
+  # Oldest first, so the excess dropped is the least likely to still matter.
+  ls -1tr "$SPOOL"/*.head 2>/dev/null | head -n $((count - MAX_ENTRIES)) | while IFS= read -r old; do
+    [ -f "$old" ] && prune_one "$old" "spool held $count entries, limit $MAX_ENTRIES"
+  done
+fi
+
 # Read at send time, never replayed from the spool — the spool deliberately holds no credential.
 ak_user="${AGENT_KNOWLEDGE_USER:-}"
 ak_token="${AGENT_KNOWLEDGE_TOKEN:-}"
@@ -79,7 +103,9 @@ for head in "$SPOOL"/*.head; do
     # 401 and 403 are kept. Before auth existed every 4xx meant "unacceptable forever", so
     # discarding was right; now the commonest 4xx is a credential problem, and discarding on it
     # would burn the whole spool over a config error.
-    401|403) log "$id: kept ($code, check credential)" ;;
+    # 403: the project id will never be right for this credential, so keeping it means for ever.
+    403) rm -f "$head" "$body"; log "$id: DISCARDED (403 — AGENT_KNOWLEDGE_PROJECT wrong for this credential)" ;;
+    401) log "$id: kept (401, check credential)" ;;
     # Kept for the same reason: a rate limit delays knowledge, it does not reject it.
     429) log "$id: kept (429 rate limited)" ;;
     # Any other 4xx is still a verdict on the note itself, which retrying cannot change.

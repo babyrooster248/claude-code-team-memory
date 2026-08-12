@@ -26,11 +26,20 @@ log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOG" 2>/dev/
 # Bash. Comparing any two of those as plain strings quietly fails, and a quiet failure here
 # means every note is dropped. Everything is folded to one shape before comparison:
 # forward slashes, drive letter as `c:/`, lower case, no trailing slash.
+#
+# The drive fold applies on Windows only. On Linux `/c/foo` is an ordinary absolute path, and
+# folding it there would invent a drive letter and break the common case to fix one that cannot
+# happen. Detected from the environment rather than by calling `uname`, because this runs on every
+# Write and Edit and a subprocess per invocation is a real cost for a constant.
+if [ -n "${WINDIR:-}${SYSTEMROOT:-}" ]; then IS_WIN=1; else IS_WIN=0; fi
+
 norm() {
   p="$(printf '%s' "$1" | tr '\\' '/')"
-  case "$p" in
-    /[A-Za-z]/*) p="$(printf '%s' "$p" | sed 's#^/\([A-Za-z]\)/#\1:/#')" ;;
-  esac
+  if [ "$IS_WIN" = 1 ]; then
+    case "$p" in
+      /[A-Za-z]/*) p="$(printf '%s' "$p" | sed 's#^/\([A-Za-z]\)/#\1:/#')" ;;
+    esac
+  fi
   printf '%s' "$p" | tr '[:upper:]' '[:lower:]' | sed 's#/*$##'
 }
 
@@ -207,7 +216,10 @@ case "$code" in
   2*) log "sent $file ($(wc -c < "$file" | tr -d ' ') bytes)" ;;
   # 401 and 403 are the machine's problem, not the note's — an env file not copied yet, a token
   # revoked. Those get fixed; a note dropped in the meantime is gone for good, so spool it.
-  401|403) spool_it "http $code — check .claude/agent-knowledge.env" ;;
+  # 403: authenticated, and the project id is not one this credential is on. No retry fixes a wrong
+  # value in a committed settings.json, and retrying it is what made the spool grow for ever.
+  403) log "NOT SENT: 403 from ingest — AGENT_KNOWLEDGE_PROJECT is wrong for this credential. Dropping $(basename "$file"); fix .claude/settings.json" ;;
+  401) spool_it "http 401 — check .claude/agent-knowledge.env" ;;
   # 429 is the endpoint asking for patience, not a verdict on the note. Dropping here would let a
   # rate limit destroy knowledge, which is the one thing a rate limit must never do.
   429) spool_it "http 429 rate limited" ;;

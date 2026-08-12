@@ -812,18 +812,45 @@ The four credential paths, exercised by invoking the hooks directly:
 The shell sender authenticates identically, which matters because it is the path on a machine with no
 node. A note sent with the wrong `AGENT_KNOWLEDGE_PROJECT` is refused and spooled.
 
-Two things this run exposed:
+Two things this run exposed, both since fixed.
 
-- **A permanently wrong project id means a permanently growing spool.** 401 is ambiguous between "a
-  credential that will be fixed" and "a project id that never will be", and both are retried, because
-  the alternative discards knowledge. `MAX_PER_RUN` caps the noise per session but nothing caps the
-  spool's size or age. Known, not fixed.
-- **The node hook does not fold `/c/`-style paths and the shell hook does.** Found by writing a test
-  harness that passed Git Bash's `$PWD` into the node hook: it resolved `/c/Users/...` to
-  `C:\c\Users\...`, matched no memory root, and exited silently — the fast path doing exactly what it
-  should with a path it could not recognise. Real Claude Code supplies native paths, so this bites
-  test harnesses rather than members, but the two senders are not equivalent here and
-  `parity-test.js` does not cover it because it builds native paths too.
+### A permanently wrong project id meant a permanently growing spool
+
+`401` could not distinguish "a token that will be fixed" from "a project id in a committed
+`settings.json` that never will be", so the senders retried both — correctly, because the alternative
+is discarding knowledge, and wrongly, because one of those two never resolves.
+
+The fix is not a cap, it is telling the two apart. The endpoint now answers **403** when the
+credential authenticates against some project but not the requested one, and the senders drop on 403
+with a loud log naming `AGENT_KNOWLEDGE_PROJECT` as the thing to correct. Saying so leaks nothing: the
+caller has already proved they hold a real credential, which is the only reason the original
+same-answer-for-every-failure rule existed. A missing project header is the same class and gets the
+same answer, and is deliberately **not** inferred from the credential even when it matches exactly one
+project — that would route notes somewhere the member never named, and would have to guess for anyone
+on two.
+
+A cap went in as well, because other permanent failures do not announce themselves: an endpoint URL
+that is wrong for good just refuses the connection every time. Both flushers prune entries older than
+30 days and trim the spool to 500 entries, oldest first, **before** the credential check — a member
+who never copies the env file is the longest-lived version of that state, and exiting early would mean
+never pruning at all. Every discard logs which note, how many days it waited, and why.
+`hooks/prune-test.js` covers both flushers, including that no orphaned `.body` is left behind.
+
+### The two senders were not equivalent on the one platform that has both
+
+The node hook did not fold `/c/Users/x` — a POSIX shell's spelling of `C:\Users\x` — and the shell
+hook did. `path.resolve` turns it into `C:\c\Users\x`, which matches no memory root, so the note left
+down the fast path with no log line, while the shell sender shipped the same note fine.
+
+Two things about the fix are worth recording. First, the obvious version of it did not work: folding
+inside `norm()`, which is what compares paths, changed nothing, because `settingsRoot()`,
+`credential()` and `fs.readFileSync` each take the raw path and resolve it themselves. The fold has
+to happen once where the value leaves the payload. Second, the fold is **Windows-only** in both
+senders now: on Linux `/c/foo` is an ordinary absolute path, and the shell hook had been folding it
+unconditionally, so the same bug existed there in the opposite direction.
+
+`parity-test.js` could not see any of this because it built native paths. It now runs every case twice
+on Windows, once in each path shape, which is 12 cases rather than 6.
 
 ## Designs that failed
 

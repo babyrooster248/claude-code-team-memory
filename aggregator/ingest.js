@@ -302,20 +302,33 @@ function authenticate(req) {
   const email = decoded.slice(0, cut).toLowerCase();
   const token = decoded.slice(cut + 1);
 
+  const verify = (m) => {
+    const got = crypto.scryptSync(token, String(m.salt), 32);
+    const want = Buffer.from(String(m.hash), 'hex');
+    return got.length === want.length && crypto.timingSafeEqual(got, want);
+  };
+
   const project = config.projects && config.projects[projectId];
   const member = project && project.members && project.members[email];
-  if (!project || !member) {
-    // Still hash something, so a wrong email does not answer faster than a wrong token.
-    crypto.scryptSync(token || 'x', 'timing', 32);
-    return { fail: 'not authorised for this project' };
+
+  if (project && member && verify(member)) {
+    return { paths: projectPaths(project), email, projectId };
   }
 
-  const got = crypto.scryptSync(token, String(member.salt), 32);
-  const want = Buffer.from(String(member.hash), 'hex');
-  if (got.length !== want.length || !crypto.timingSafeEqual(got, want)) {
-    return { fail: 'not authorised for this project' };
+  // The credential is good but not for this project. Saying so is safe — the caller has already
+  // proved they hold a real credential, so it tells an outsider nothing — and it is the difference
+  // between a spool that drains and one that grows for ever. A 401 cannot distinguish "a token that
+  // will be fixed" from "a project id in a committed settings.json that never will be", so senders
+  // retry both; 403 says "authenticated, and this will never work", and they drop it and log loudly.
+  const elsewhere = Object.entries(config.projects || {})
+    .some(([id, p]) => id !== projectId && p.members && p.members[email] && verify(p.members[email]));
+  if (elsewhere) {
+    return { fail: `credential is valid but not for project "${projectId}"`, forbidden: true };
   }
-  return { paths: projectPaths(project), email, projectId };
+
+  // Nothing matched. Hash once more so a wrong email does not answer faster than a wrong token.
+  crypto.scryptSync(token || 'x', 'timing', 32);
+  return { fail: 'not authorised for this project' };
 }
 
 http.createServer((req, res) => {
@@ -335,8 +348,9 @@ http.createServer((req, res) => {
 
   const auth = authenticate(req);
   if (auth.fail) {
-    console.error(`[ingest] 401 (${auth.fail}) from ${req.socket.remoteAddress}`);
-    return send(401, { error: 'not authorised' },
+    const code = auth.forbidden ? 403 : 401;
+    console.error(`[ingest] ${code} (${auth.fail}) from ${addr}`);
+    return send(code, { error: auth.forbidden ? auth.fail : 'not authorised' },
       auth.challenge ? { 'WWW-Authenticate': 'Basic realm="agent-knowledge"' } : {});
   }
 

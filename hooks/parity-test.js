@@ -41,10 +41,21 @@ const health = () => new Promise(r => {
   req.setTimeout(400, () => { req.destroy(); r(false); });
 });
 
-function fire(runner, file) {
+// A POSIX shell on Windows reports `C:\Users\x` as `/c/Users/x`, and a payload can arrive carrying
+// that shape. The shell sender folded it and the node sender did not, so on the one platform that
+// has both runtimes the two were not equivalent — a note that one shipped, the other dropped down
+// the fast path with no log line. This test could not see it, because it builds native paths, so
+// `posix` re-runs every case with the drive letter rewritten.
+const toPosix = p => (process.platform === 'win32'
+  ? String(p).replace(/\\/g, '/').replace(/^([A-Za-z]):\//, (_, d) => `/${d.toLowerCase()}/`)
+  : String(p));
+
+function fire(runner, file, style) {
+  const p = style === 'posix' ? toPosix(file) : file;
+  const c = style === 'posix' ? toPosix(proj) : proj;
   const payload = JSON.stringify({
     hook_event_name: 'PostToolUse', tool_name: 'Write', session_id: 'parity',
-    cwd: proj, tool_input: { file_path: file, content: 'ignored — both read from disk' },
+    cwd: c, tool_input: { file_path: p, content: 'ignored — both read from disk' },
   });
   const [cmd, args] = runner === 'sh'
     ? ['sh', [path.join(__dirname, 'post-note.sh')]]
@@ -93,18 +104,24 @@ const clearInbox = () => {
   if (!(await health())) { console.error('ingest failed to start'); srv.kill(); process.exit(2); }
 
   let fails = 0;
-  for (const [label, name, content] of CASES) {
+  // On Windows every case runs twice: once with native paths, once with the `/c/...` shape a POSIX
+  // shell reports. Elsewhere the second style is identical to the first, so it is skipped.
+  const STYLES = process.platform === 'win32' ? ['native', 'posix'] : ['native'];
+  const plan = [];
+  for (const c of CASES) for (const style of STYLES) plan.push([c, style]);
+
+  for (const [[label, name, content], style] of plan) {
     const file = path.join(notesRoot, name);
     fs.writeFileSync(file, content, 'utf8');
     const onDisk = fs.readFileSync(file);
     const wire = file.replace(/\\/g, '/');
 
     clearInbox();
-    const shStatus = fire('sh', wire);
+    const shStatus = fire('sh', wire, style);
     const bodySh = stored();
 
     clearInbox();
-    const ndStatus = fire('node', wire);
+    const ndStatus = fire('node', wire, style);
     const bodyNd = stored();
 
     const problems = [];
@@ -115,11 +132,11 @@ const clearInbox = () => {
     if (bodySh && bodyNd && !bodySh.equals(bodyNd)) problems.push('the two senders disagree');
 
     if (problems.length) fails++;
-    console.log(`  ${problems.length ? 'FAIL' : 'ok  '} ${label.padEnd(20)} ${String(onDisk.length).padStart(6)}B` +
+    console.log(`  ${problems.length ? "FAIL" : "ok  "} ${(label + " [" + style + "]").padEnd(34)} ${String(onDisk.length).padStart(6)}B` +
       (problems.length ? `\n         ${problems.join('; ')} (exit sh=${shStatus} node=${ndStatus})` : ''));
   }
 
   srv.kill();
-  console.log(fails ? `\n${fails}/${CASES.length} case(s) failed` : `\n${CASES.length}/${CASES.length} match — both senders deliver byte-identical notes`);
+  console.log(fails ? `\n${fails}/${plan.length} case(s) failed` : `\n${plan.length}/${plan.length} match — both senders deliver byte-identical notes`);
   process.exit(fails ? 1 : 0);
 })();

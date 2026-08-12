@@ -24,6 +24,38 @@ const log = m => { try { fs.appendFileSync(LOG, `${new Date().toISOString()} [fl
 const ingest = process.env.AGENT_KNOWLEDGE_INGEST;
 if (!ingest || !fs.existsSync(SPOOL)) process.exit(0);
 
+// Bound the spool. 403 now covers the wrong-project case, but other permanent failures do not
+// announce themselves — an endpoint URL that is wrong for good just refuses the connection every
+// time — and the spool would grow until the disk noticed. Deliberately large and deliberately loud:
+// every discard is a note nobody will ever read, so it is worth a line saying which one and why.
+//
+// Pruned before the credential check, not after. A member who never copies the env file is the
+// longest-lived version of this state, and exiting early would mean never pruning at all.
+const MAX_ENTRIES = 500;
+const MAX_AGE_DAYS = 30;
+try {
+  const heads = fs.readdirSync(SPOOL).filter(f => f.endsWith('.head'))
+    .map(f => {
+      let mtime = 0;
+      try { mtime = fs.statSync(path.join(SPOOL, f)).mtimeMs; } catch {}
+      return { f, mtime };
+    })
+    .sort((a, b) => a.mtime - b.mtime);
+
+  const cutoff = Date.now() - MAX_AGE_DAYS * 86400000;
+  const doomed = heads.filter(h => h.mtime && h.mtime < cutoff);
+  const excess = heads.slice(0, Math.max(0, heads.length - MAX_ENTRIES));
+  for (const h of new Set([...doomed, ...excess])) {
+    const id = h.f.replace(/\.head$/, '');
+    const days = h.mtime ? Math.round((Date.now() - h.mtime) / 86400000) : '?';
+    fs.rmSync(path.join(SPOOL, h.f), { force: true });
+    fs.rmSync(path.join(SPOOL, `${id}.body`), { force: true });
+    log(`DISCARDED ${id} — undelivered for ${days} day(s), spool held ${heads.length} entries ` +
+        `(limits: ${MAX_ENTRIES} entries, ${MAX_AGE_DAYS} days). The endpoint has been unreachable ` +
+        `or refusing for a long time; this note is lost.`);
+  }
+} catch (e) { log(`spool prune failed: ${String(e.message).slice(0, 120)}`); }
+
 // The credential is read here rather than replayed from the spool, because the spool deliberately
 // does not hold it. Walks up from the session directory for the same reason the sender does.
 function credential(startDir) {
@@ -92,7 +124,13 @@ function send(id) {
       // credential problem — not yet issued, mistyped, revoked and reissued — and discarding on it
       // would burn the entire spool over a config error, which is the most destructive thing this
       // hook could do. Everything else in the 4xx range is still a verdict on the note itself.
-      if (code === 401 || code === 403) return resolve(`${id}: kept (${code}, check credential)`);
+      // 403 is authenticated-and-forbidden: the project id will never be right for this credential,
+      // so keeping the entry means keeping it for ever. Dropped, loudly.
+      if (code === 403) {
+        drop();
+        return resolve(`${id}: DISCARDED (403 — AGENT_KNOWLEDGE_PROJECT wrong for this credential)`);
+      }
+      if (code === 401) return resolve(`${id}: kept (401, check credential)`);
       // 429 likewise: a rate limit exists to delay knowledge, never to destroy it. A flusher that
       // discarded on it would empty the spool precisely when the endpoint asked it to slow down.
       if (code === 429) return resolve(`${id}: kept (429 rate limited)`);

@@ -340,8 +340,21 @@ already paid for it.
 
 One trap worth naming, because getting it wrong would have made the rate limit worse than useless:
 **429 is a 4xx**, and every sender used to discard 4xx as "unacceptable forever". A rate limit that
-discarded notes would be a cost control that destroys knowledge. Both senders and both flushers now
-spool on 429 and on 401/403, and drop only on the codes that are a verdict about the note itself.
+discarded notes would be a cost control that destroys knowledge. So the codes are split by whether a
+retry can ever help:
+
+| Code | Meaning | Senders |
+| --- | --- | --- |
+| 429 | slow down | **spool** — a rate limit delays knowledge, never destroys it |
+| 401 | credential not accepted | **spool** — not copied yet, mistyped, or just reissued |
+| 403 | authenticated, wrong project | **drop, loudly** — `AGENT_KNOWLEDGE_PROJECT` is wrong in a committed file and no retry fixes it |
+| other 4xx | a verdict on this note | drop |
+
+The 401/403 split is what stops the spool growing for ever, and the endpoint can make it safely
+because a 403 is only ever returned to a caller who already proved they hold a real credential. As a
+backstop for failures that never answer at all — an endpoint URL that is permanently wrong just
+refuses the connection — both flushers also prune entries past 30 days and trim the spool to 500,
+oldest first, logging every discard with how long it waited.
 
 **If the host is on the LAN, skip all of it.** Run without `--config`: no credential anywhere, no
 member setup, and the endpoint refuses to bind anything but loopback.
@@ -466,11 +479,13 @@ that do not work, and the numbers proving it.
 | `hooks/flush-spool.js`, `hooks/flush-spool.sh` | SessionStart — resend notes that could not get out |
 | `hooks/parity-test.js` | asserts the two senders deliver byte-identical notes |
 | `hooks/spool-test.js` | asserts either flusher drains either sender's spool |
+| `hooks/parity-test.js` (Windows) | runs every case in both path shapes, native and `/c/...` |
 | `hooks/settings-snippet.json` | what to commit into the project's `.claude/settings.json` |
 | `hooks/agent-knowledge.env.sample` | the member's one-time copy-and-fill credential file |
 | `aggregator/config.sample.json` | server config — projects, members, credential hashes |
 | `aggregator/make-credential.js` | issues one member credential; prints the config entry and the member's two lines |
-| `aggregator/auth-test.js` | 19 cases over auth and rate limiting — forged identity, cross-project writes, 429 handling, cleartext refusal |
+| `aggregator/auth-test.js` | 20 cases over auth and rate limiting — forged identity, cross-project writes, 401 vs 403, cleartext refusal |
+| `hooks/prune-test.js` | 14 cases over spool pruning — nothing dropped quietly, no orphaned bodies |
 | `aggregator/ingest.js` | receives notes; refuses unattributable ones and anything carrying a credential |
 | `aggregator/secret-test.js` | 26 cases over the secret scan — 10 refused, 16 that must not be |
 | `aggregator/merge-prompt.md` | the merge pass: sharpen, merge, delete, promote |
@@ -485,7 +500,7 @@ that do not work, and the numbers proving it.
 | `docs/findings.md` | every measurement, including the designs that failed |
 
 ```bash
-npm test                                     # all five suites, no network, no model
+npm test                                     # all six suites, no network, no model
 
 cd eval                                      # these need a model
 node run-eval.js --model opus --runs 3       # the configuration to run in production

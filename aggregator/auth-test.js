@@ -87,8 +87,10 @@ const events = (dir) => {
   for (let i = 0; i < 60 && !/listening/.test(serverLog); i++) await new Promise(r => setTimeout(r, 100));
 
   let fails = 0;
+  let ran = 0;   // counted, not hard-coded: a stale total silently under-reports the suite
   const check = (name, got, want) => {
     const ok = got === want;
+    ran++;
     if (!ok) fails++;
     console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(52)} → ${got} (want ${want})`);
   };
@@ -98,9 +100,22 @@ const events = (dir) => {
   check('no Authorization header', await send({ project: 'catalog-svc' }), 401);
   check('wrong token', await send({ auth: basic(minh.email, 'nope'), project: 'catalog-svc' }), 401);
   check('unknown email', await send({ auth: basic('ghost@example.com', minh.token), project: 'catalog-svc' }), 401);
-  check('unknown project', await send({ auth: basic(minh.email, minh.token), project: 'no-such' }), 401);
-  check('no project header', await send({ auth: basic(minh.email, minh.token) }), 401);
-  check('member not on that project', await send({ auth: basic(minh.email, minh.token), project: 'storefront' }), 401);
+  check('unknown project, valid credential', await send({ auth: basic(minh.email, minh.token), project: 'no-such' }), 403);
+  // A missing project header is the same class as a wrong one: AGENT_KNOWLEDGE_PROJECT is unset in
+  // a committed settings.json, and no retry fixes that either. Deliberately not inferred from the
+  // credential even when it matches exactly one project — that would route notes to a project the
+  // member never named, and would have to pick arbitrarily for anyone on two.
+  check('no project header, valid credential → 403', await send({ auth: basic(minh.email, minh.token) }), 403);
+  // 403, not 401. The credential is real and the project id is not one this member is on — a value
+  // in a committed settings.json that no retry will ever fix. Returning 401 there made the senders
+  // spool it for ever, which is how the spool grew without bound. Saying so leaks nothing: the caller
+  // has already proved they hold a valid credential.
+  check('member not on that project → 403, not 401',
+    await send({ auth: basic(minh.email, minh.token), project: 'storefront' }), 403);
+  check('unknown project with a valid credential → 403',
+    await send({ auth: basic(minh.email, minh.token), project: 'no-such-project' }), 403);
+  check('bad token on a project the email is on → still 401',
+    await send({ auth: basic(minh.email, 'wrong'), project: 'catalog-svc' }), 401);
   check('valid credential', await send({ auth: basic(minh.email, minh.token), project: 'catalog-svc' }), 200);
   check('same member, second project they are on', await send({ auth: basic(lan.email, lan.token), project: 'storefront' }), 200);
 
@@ -154,8 +169,7 @@ const events = (dir) => {
   check('refuses 0.0.0.0 without --behind-tls-proxy', r.status, 2);
   check('and says why', /cleartext/.test(r.stderr), true);
 
-  const total = 19;
-  console.log(fails ? `\n${fails}/${total} case(s) failed` : `\n${total}/${total} passed`);
+    console.log(fails ? `\n${fails}/${ran} case(s) failed` : `\n${ran}/${ran} passed`);
   fs.rmSync(tmp, { recursive: true, force: true });
   process.exit(fails ? 1 : 0);
 })();

@@ -15,16 +15,21 @@
   "license": "MIT",
   "author": "BabyRooster",
   "type": "commonjs",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "_no_dependencies": "There are none, and that is deliberate: the member-side hooks have to run on a machine where nothing was installed, so nothing here may need installing either.",
   "scripts": {
-    "test": "node aggregator/gate-test.js && node aggregator/secret-test.js && node aggregator/auth-test.js && node hooks/parity-test.js && node hooks/spool-test.js",
+    "test": "node aggregator/gate-test.js && node aggregator/secret-test.js && node aggregator/auth-test.js && node hooks/parity-test.js && node hooks/spool-test.js && node hooks/prune-test.js",
     "test:gate": "node aggregator/gate-test.js",
     "test:secrets": "node aggregator/secret-test.js",
     "test:parity": "node hooks/parity-test.js",
     "test:spool": "node hooks/spool-test.js",
-    "eval": "node eval/run-eval.js --model sonnet --runs 3",
+    "eval": "node eval/run-eval.js --model opus --runs 3",
     "scan": "node aggregator/scan-repo.js",
-    "check": "node aggregator/check-artifact.js"
+    "check": "node aggregator/check-artifact.js",
+    "test:auth": "node aggregator/auth-test.js",
+    "test:prune": "node hooks/prune-test.js",
+    "eval:compare": "node eval/compare-models.js"
   }
 }

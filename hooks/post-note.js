@@ -32,7 +32,16 @@ const TIMEOUT_MS = 2000;
 // contains no such segment. A hook keyed on the segment would match nothing under the
 // recommended configuration and ship nothing, on the hot path, with no log line. So the
 // root is configuration, and the default auto-memory layout is only the fallback.
-const norm = p => path.resolve(expand(String(p))).replace(/\\/g, '/').toLowerCase();
+// `/c/Users/x` is what a POSIX shell on Windows calls `C:\Users\x`, and node does not know that:
+// path.resolve turns it into `C:\c\Users\x`, which matches no memory root, so the note exits down
+// the fast path with no log line at all. The shell sender already folded this shape and this one did
+// not, which made the two senders unequal on exactly the platform that has both.
+//
+// Only on Windows. On Linux `/c/foo` is an ordinary absolute path and folding it would invent a
+// drive letter, breaking the common case to fix a case that cannot occur there.
+const WIN = process.platform === 'win32';
+const foldDrive = s => (WIN ? String(s).replace(/^\/([A-Za-z])\//, '$1:/') : String(s));
+const norm = p => path.resolve(foldDrive(expand(String(p)))).replace(/\\/g, '/').toLowerCase();
 function expand(p) { return p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p; }
 
 // The root is read from `autoMemoryDirectory`, the same key Claude Code itself uses to
@@ -182,7 +191,16 @@ function post(url, note, onFail, auth) {
     // issued, a credential just revoked. Those get fixed, and a note dropped meanwhile is gone for
     // good — so spool it. Every other 4xx is a judgement about this note, which retrying cannot
     // change, so drop it and say why.
-    else if (res.statusCode === 401 || res.statusCode === 403 || res.statusCode === 429) {
+    // 403 means the endpoint authenticated the credential and still refuses: the project id in
+    // .claude/settings.json is not one this member is on. No retry can fix that, and retrying it is
+    // what made the spool grow without bound, so drop it — but say so loudly, because unlike an
+    // unacceptable note this is a configuration error somebody has to go and correct.
+    else if (res.statusCode === 403) {
+      log(`NOT SENT: 403 from ingest — AGENT_KNOWLEDGE_PROJECT is wrong for this credential. ` +
+          `Dropping ${path.basename(note.file_path)}; fix .claude/settings.json.`);
+      done();
+    }
+    else if (res.statusCode === 401 || res.statusCode === 429) {
       onFail(`ingest returned ${res.statusCode} — check .claude/agent-knowledge.env`);
     }
     else if (res.statusCode >= 400 && res.statusCode < 500) { log(`refused ${res.statusCode} by ingest, dropping`); done(); }
@@ -203,7 +221,12 @@ try {
   done();
 }
 
-const file = payload?.tool_input?.file_path;
+// Folded here, once, rather than inside norm(). norm() is only used for comparison, but this value
+// is also handed to fs.readFileSync and to two directory walks that call path.resolve themselves —
+// and path.resolve turns `/c/Users/x` into `C:\c\Users\x`, which exists nowhere. Folding at the
+// comparison alone was the first attempt at this fix and it changed nothing, because every path
+// that mattered had already been resolved wrongly by then.
+const file = foldDrive(payload?.tool_input?.file_path);
 // The common case by far is an ordinary source edit, so this stays a prefix comparison
 // with no I/O. It is deliberately the one silent exit in this script: logging every
 // source edit would bury the lines that matter.
@@ -216,7 +239,7 @@ const ingest = process.env.AGENT_KNOWLEDGE_INGEST;
 // silently — the same failure as the old literal-`memory` match, reached by a different
 // route. Using the project root removes the "always open Claude from the repo root"
 // rule instead of asking people to remember it.
-const cwd = process.env.CLAUDE_PROJECT_DIR || payload.cwd || process.cwd();
+const cwd = foldDrive(process.env.CLAUDE_PROJECT_DIR || payload.cwd || process.cwd());
 
 if (!file) done();
 const memoryRoot = underRoot(file, cwd);
