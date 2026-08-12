@@ -674,6 +674,75 @@ The rules now separate the two questions explicitly and give the model both exam
 lines, and every existing line is re-tested on every run rather than only the incoming
 candidates.
 
+## 9. The capture instruction: a rewrite that was not shown to be better
+
+The five lines in `CLAUDE.md` are the highest-leverage part of the system — nothing downstream can
+recover a note that was never written — and they had the weakest measurement behind them: 0/3
+against 2/2, n=5. So they were re-measured properly, with a rewrite as the challenger.
+
+**Method.** A sandbox with seven knowledge classes planted, each modelled on a real case from
+`eval/cases.jsonl` rather than on the wording of the instruction under test, and each discoverable
+only by *doing* — running a script, reading a thrown error, tripping the linter. Acceptance criteria
+were written to a file before any session ran. Three instructions were compared: **A**, the version
+currently published; **B**, a rewrite with six triggers and six kinds; **C**, A plus the single
+clause that A vs B suggested was earning its place.
+
+One scoring rule mattered more than any other: **a class counts as missed only if the session
+actually met it.** The agent chooses its own route, so a class it never reached is missing data. The
+first version of the scorer lacked that gate for the stale-note class, and a session that died on a
+DNS error was consequently scored as four failures — which would have "proved" that adding a clause
+made things worse.
+
+**Result.** No pair of arms is distinguishable.
+
+| batch | arm A | arm B | arm C | Fisher exact, A vs B |
+| --- | --- | --- | --- | --- |
+| pilot, model not pinned | 21/24 (87.5%) | 24/24 (100%) | 22/24 (91.7%) | **p = 0.234** |
+| pinned to opus | 6/6 (100%) | 6/6 (100%) | — | **p = 1.000** |
+
+Decision rules were fixed before the numbers were read: `p < 0.05` adopt the rewrite; `0.05–0.10`
+record a direction and change nothing; `p ≥ 0.10` keep the current instruction and record that the
+longer version was not shown to be better. The third case is what happened, twice, so **the
+published instruction stands unchanged.**
+
+Two further reasons not to adopt the rewrite, both measured rather than argued:
+
+- **Five of its six additions earn nothing.** Arm A reproduced the exact string
+  `SQLITE_CONSTRAINT: FOREIGN KEY constraint failed` in 4/4 sessions without being told to, and
+  corrected the stale note *in place* in 4/4 without a clause asking for it. The shared-infrastructure
+  hazard was captured 4/4 without that kind being listed. Applying this project's own removal test to
+  its own instruction deletes those lines: they would bill every teammate every session for behaviour
+  that is already there.
+- **The one weakness vanished when the model was pinned.** Arm A's only real gap was the
+  source-of-truth class, 2/4 in the unpinned pilot. On opus it was 1/1, along with every other class.
+  Consistent with §3: the model dominates, and a defect attributed to prompt wording is worth
+  re-testing on a stronger model before the wording is touched.
+
+### What the experiment did establish
+
+- **`"before finishing the turn"` does not fire when the turn ends in a question.** One session
+  worked out the whole do-not-touch rule, wrote three paragraphs of correct analysis about it, ended
+  by asking the user which of two options to take — and recorded nothing. The knowledge was fully
+  settled and independent of the answer. The rewrite shares the same phrase, so it shares the gap;
+  its sessions escaped only by finishing their work. This is a real defect with direct evidence and
+  **no measurement behind a fix**, so it is recorded rather than patched.
+- **A class can be planted and still produce no data.** The `@module` convention was never measured
+  across 12 sessions: every pre-existing file carried the header, so agents copied it by pattern and
+  the linter never went red. No discovery event, nothing to record. The design flaw is in the
+  sandbox, and the class is left visibly unmeasured in the table rather than dropped to tidy it.
+
+### What it cost, which is itself the finding
+
+Every observation here is a full agent session of about 130 seconds doing real work, where an
+observation in §3 is one small prompt. Launching 20 sessions in parallel to reach 60 observations per
+arm **exhausted the account's monthly spend limit**; 18 of the 20 died in five seconds and the batch
+yielded one valid session per arm.
+
+That asymmetry explains why this component had the flimsiest evidence in the whole project despite
+being the most load-bearing: measuring the filter is nearly free, and measuring capture is not.
+Anyone repeating this should size the batch against a spend limit first, run the arms sequentially,
+and treat 10 sessions per arm as a real budget decision rather than a default.
+
 ## Designs that failed
 
 **Mining the transcript for moments something went wrong.** Parse the session transcript at `SessionEnd`,

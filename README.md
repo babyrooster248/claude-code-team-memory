@@ -227,6 +227,7 @@ cases, majority of 3 votes. Full method and the failed designs are in
 | --- | --- |
 | Agents saving knowledge, no `CLAUDE.md` instruction | **0 / 3** sessions |
 | Agents saving knowledge, 5-line instruction | **2 / 2** sessions |
+| The 5-line instruction vs a longer rewrite, 7 planted classes | **indistinguishable** — p = 0.234 unpinned, p = 1.000 on opus |
 | Notes that are machine-local rather than project knowledge | **1 in 3** |
 | Intake filter on **opus**, 29 cases, majority of 3 | **100%** accuracy / precision / recall, 0 unstable |
 | Same prompt on **haiku** | 89.7% accuracy, 94.1% precision, 88.9% recall — 1 junk through |
@@ -359,6 +360,13 @@ find them:
 - **The filter's accuracy belongs to the model, not to this repo.** It scores 100% on opus and 50%
   recall on sonnet with the prompt untouched, so upgrading, downgrading or switching the model is a
   change to the filter and has to be re-measured. Pin the model you run.
+
+- **`"before finishing the turn"` does not fire when the turn ends in a question.** Measured: a
+  session worked out a do-not-touch rule, wrote three paragraphs of correct analysis about it, ended
+  by asking which of two options to take, and recorded nothing — while the knowledge was settled
+  regardless of the answer. A one-clause fix is obvious and is deliberately not applied, because a
+  rewrite of these five lines was measured against the current one and came out indistinguishable
+  (`docs/findings.md` §9). Guessing is how the last figure in this README went stale.
 
 Also known and documented: a line that was true, that the code has since made false, and that
 nobody hits again, has no trigger to correct it. The only mitigation is keeping the file small and
