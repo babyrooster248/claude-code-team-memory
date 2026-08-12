@@ -420,5 +420,24 @@ if (has('commit') && file.trim() === current.trim()) {
   const sha = git(['rev-parse', '--short', 'HEAD']).stdout.trim();
   console.log(gate.auto
     ? `committed ${sha} on the current branch — a confidence change carries no decision, so no review`
-    : `committed ${sha} on ${branch} — push it and open a PR for review`);
+    : `committed ${sha} on ${branch} — open a PR for review`);
+
+  // Pushing used to be the operator's job, which was fine while a person ran this by hand: they were
+  // already at a terminal and would open the pull request themselves. Once the endpoint started
+  // launching it there is nobody there, and a commit that only exists in the host's own clone reaches
+  // no teammate at all — the auto-apply path in particular would "apply itself" into a directory
+  // nobody ever reads. Opt-in, because the manual path should not suddenly start pushing.
+  if (has('push')) {
+    const cur = git(['rev-parse', '--abbrev-ref', 'HEAD']).stdout.trim();
+    const p = git(['push', '--set-upstream', 'origin', cur], { probe: true });
+    if (p.status === 0) {
+      console.log(`pushed ${cur} to origin`);
+    } else {
+      // Loud, and not fatal: the commit is real and local, so the work is not lost — but silence here
+      // would mean a pull request that never appears and no clue why.
+      console.error(`\nPUSH FAILED — ${sha} is committed on ${cur} in ${repo} but did not reach origin.\n` +
+        `  ${(p.stderr || p.stdout || '').trim().split('\n').slice(-2).join(' ')}\n` +
+        `  Nothing is lost. Fix the remote or the credential and push ${cur} by hand.`);
+    }
+  }
 }

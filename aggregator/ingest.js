@@ -399,6 +399,9 @@ function runAggregate(projectId, project, paths) {
     '--model', cfg.model,
   ];
   if (cfg.commit) args.push('--commit');
+  // Without this the commit lives only in the host's clone and no teammate ever sees it — including
+  // an auto-applied confidence change, which would "apply itself" into a directory nobody reads.
+  if (cfg.push) args.push('--push');
 
   aggLog(projectId, `running: node ${args.slice(1).join(' ')}`);
   const started = Date.now();
