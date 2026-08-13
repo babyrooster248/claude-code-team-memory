@@ -1072,6 +1072,68 @@ a fresh checkout it does not — the agent noticed and said so, treating the ent
 instead. In real use the command would exist, because the session that wrote the note created it. But
 it is the same staleness problem this project still cannot solve, arriving from a third direction.
 
+## 15. The whole loop, over the internet, with real authentication
+
+Everything before this was verified in pieces. This ran end to end on the shape a team would actually
+use: a public project repository, a member's clone, a knowledge host on a GCP VM behind Caddy with a
+real certificate, and nobody typing anything after the two prompts.
+
+**Setup.** `git clone` of the demo project, then one file — `.claude/agent-knowledge.env` with the
+member's email, their issued token, and the endpoint. Nothing else. The committed
+`.claude/settings.json` carries only `AGENT_KNOWLEDGE_PROJECT`, because the repository is public and
+the address of a write endpoint does not belong in a public git history.
+
+**Two turns.** The agent was asked for a CSV export and wrote it with `InvariantCulture` — correct
+from reading the code. The user corrected it in one sentence, including the consequence. Along the
+way, unasked, the agent also checked the pre-seeded stale entry by enabling `LogTo` and reading the
+generated SQL, and reported that its conclusion no longer held.
+
+**What crossed the wire.** Three notes, attributed to `hoang@babyrooster.dev` with
+`source: basic-auth`; `MEMORY.md` refused as a personal index; both hooks firing so each note arrived
+twice and the debounce collapsed them.
+
+**What ran by itself.** Two aggregate runs — the second because notes arrived while the first was in
+flight, which is the single-flight follow-up doing exactly one extra pass rather than one per note.
+Both committed and **pushed** to a branch through a deploy key scoped to that one repository. The
+branch sat two commits ahead of `main`, a click away from a pull request.
+
+| | |
+| --- | --- |
+| Aggregate wall-clock on a 958 MB VM | **81s** and **68s** |
+| Notes accepted / refused | 3 / 1 |
+| Aggregate runs for 3 notes arriving as 6 accepts | **2** |
+
+That timing was the last unmeasured number in the demo plan. It fits inside the two minutes the
+transport act takes, so the run really has finished by the time anyone looks at it.
+
+### The contradiction rule, working unprompted
+
+The pre-seeded artifact carried a deliberately stale entry: `OrderBy(Price)` sorts as text on SQLite.
+The session disproved it. The merge pass did not quietly delete the old line or quietly keep it —
+it kept **both**, marked them as disputed, and said so in the commit subject:
+
+> *chore(agent-knowledge): conflict [k4] vs new [k5]: one person saw OrderBy(Price) sort as text,
+> another verified COLLATE EF_DECIMAL sorts correctly on EF Core 10 — kept both, marked disputed,
+> human must choose.*
+
+That is the rule from `merge-prompt.md` — *contradictions are not yours to settle* — arriving on real
+input, from a stale entry planted precisely to see whether it would.
+
+It also exposed a wording bug: `[k5]` was marked *"DISPUTES [k5]'s premise"*, pointing at itself, which
+gives a reviewer nowhere to look. Fixed in the prompt rather than in the checker, because the format
+had never been specified — there was nothing for a checker to validate against.
+
+### The knowledge that came out
+
+> *"CSV for the finance team must be `;`-delimited with `,` decimals, UTF-8 with BOM — they open it in
+> Excel under a vi-VN locale. The default `,`-delimited `.`-decimal output looks fine but Excel drops
+> every row into one column; with `;` but `.` decimals the columns line up yet the price column
+> silently stops summing. Delimiter and decimal mark are one decision."*
+
+No part of that is in the repository. The failure mode in the middle — columns that look right while
+the totals silently stop working — is the kind of thing somebody learns once, expensively, and then
+explains to every new joiner.
+
 ## Designs that failed
 
 **Mining the transcript for moments something went wrong.** Parse the session transcript at `SessionEnd`,

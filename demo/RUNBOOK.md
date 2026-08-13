@@ -83,9 +83,9 @@ journal carries its whole output, prefixed `[trigger:catalog-svc]`.
 **Beat landed if:** exactly **one** run appears for the note, the per-note `KEEP`/`DROP` lines carry
 reasons, the gate says `NEEDS A PERSON`, and a branch `agent-knowledge/<date>` was committed.
 
-**Unverified on this host:** the wall-clock of a real run on 1 GB of RAM. Measure it at rehearsal. If
-it takes longer than act 2, open act 3 by reading a run that is still going — that is honest and still
-shows the mechanism. Do not promise "and it's finished" before knowing.
+**Measured on this host: 81s and 68s** on 958 MB of RAM. That fits inside act 2, so by the time you
+look, the run has finished. Two runs is also normal and worth pointing at — notes arriving while the
+first was in flight trigger exactly one follow-up, not one run per note.
 
 **If the trigger did not fire:** run `aggregate.js` by hand and **say that the trigger did not fire**.
 Typing it silently, as though it were automatic, is the one thing that would make the rest of the
@@ -105,8 +105,10 @@ Then say what happens next, and do not demonstrate it yet: the deleted line land
 and the proof that it is never re-proposed arrives in act 5, on the next run — which a **new note**
 triggers, not a merge.
 
-**Verified:** deletion-as-rejection and hand-edit tolerance are covered by 16 automated cases. The
-reviewer's own copy of this beat has not been rehearsed.
+**Verified:** deletion-as-rejection and hand-edit tolerance are covered by 16 automated cases, and a
+real run produced a genuine conflict to reconcile — a session disproved a stale entry, and the merge
+kept both lines, marked them disputed, and said so in the commit subject rather than picking a winner.
+That is a better act 4 than a wording change: the reviewer has an actual decision to make.
 
 ## Act 5 — the colleague's machine (6')
 

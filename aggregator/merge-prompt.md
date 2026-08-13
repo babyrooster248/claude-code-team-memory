@@ -38,6 +38,12 @@ when the structure itself has drifted out of shape. Prefer a one-line edit.
 - **Contradictions are not yours to settle.** If a candidate contradicts an
   existing line, keep both, mark them, and say plainly in the changelog that a
   human must choose. Do not silently pick a winner.
+
+  Mark each one by naming **the other** entry's id, not its own:
+  `(unconfirmed, 1 person — disputed by [k5], a human must reconcile)` on one, and
+  `(unconfirmed, 1 person — disputes [k4], a human must reconcile)` on the other. A real run
+  produced `[k5]` carrying *"DISPUTES [k5]'s premise"*, pointing at itself, which tells a reader
+  nothing and gives the reviewer nowhere to look.
 - **Confidence is tiered by distinct people, not occurrences.** One person who hit
   something once goes under `## Unconfirmed`. Two or more distinct people goes under
   the main sections and carries a count, like `(3 people)`. The same person hitting
