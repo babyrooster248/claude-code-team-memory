@@ -1134,6 +1134,43 @@ No part of that is in the repository. The failure mode in the middle — columns
 the totals silently stop working — is the kind of thing somebody learns once, expensively, and then
 explains to every new joiner.
 
+## 16. Two members on one machine, and the guard that caught the accident
+
+Simulating a second member locally — second credential, second Claude account, second clone — ran
+into three shared-per-machine resources. Two were anticipated; the third was not, and it invalidated
+the run.
+
+**`autoMemoryDirectory` in `settings.local.json` does not override `settings.json`.** The second
+clone was given a separate memory directory that way, and Claude Code ignored it: the second
+session's notes went straight into the first member's directory, and — worse for the test — the
+second agent could *read* the first member's notes. That destroys the thing the run was meant to
+measure, because the knowledge could have come from memory rather than from the shared artifact.
+Overriding the key in the clone's own `settings.json` is what works.
+
+**The spool is per-machine, not per-identity.** `~/.agent-knowledge-spool` is shared, so a note
+queued by one member is flushed by whichever session runs next — **with that session's credential**.
+On a real team each person has their own machine and this cannot happen. In a simulation it silently
+reattributes authorship, and authorship is the one thing the promotion rule rests on. It was empty
+here; it was checked before anything else.
+
+**The accident produced a false second contributor, and the guard named it.** The second session
+edited one of the first member's notes in the shared directory, so the hook shipped it again under
+the second credential. Two credentials, one person, one note — the exact shape that would promote an
+entry to `(2 people)` on one person's evidence. The endpoint logged it:
+
+> *WARNING one Claude account, two credentials: 75db929b… has authenticated as both hoang@… and
+> colleague@… If that is one person, they can promote an entry alone — revoke one credential.*
+
+That warning exists because a self-asserted identity is exactly what authentication was added to
+stop, and it was written expecting deliberate misuse. It caught an accident instead, which is a
+better test of it: nobody was trying to fool anything.
+
+The re-sent note was then removed from the inbox and from `events.jsonl`, dropping the second
+contributor back to the one note that was genuinely theirs. That is the design working as intended —
+the machine flags what it cannot verify and a person decides — but it is worth being plain that the
+machine did **not** refuse the note on its own. It counted it and warned. Nothing downstream would
+have stopped a promotion if the warning had gone unread.
+
 ## Designs that failed
 
 **Mining the transcript for moments something went wrong.** Parse the session transcript at `SessionEnd`,

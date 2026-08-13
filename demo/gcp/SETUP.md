@@ -57,7 +57,15 @@ have to pass `--behind-tls-proxy` — a flag that asserts something the endpoint
 
 `make-credential.js` prints the token once and stores only a scrypt hash, so a stolen `config.json`
 cannot be replayed. Keep the tokens in a `600` file and hand them out the way you would any other
-credential.
+credential. There is no recovery path: a lost token is reissued, not looked up.
+
+**Restart after editing `members`.** The config is read once at startup, so adding or revoking a
+member without a restart leaves the endpoint using the old list — and the symptom is a `401` that
+makes no sense to the person holding a credential you can see in the file:
+
+```bash
+systemctl --user restart agent-knowledge-ingest
+```
 
 Lower the rate limits from the shipped defaults while you are in there. On a public endpoint the
 pre-auth bucket is the only thing between a flood of bad credentials and scrypt exhausting a 1 GB box:
