@@ -1178,6 +1178,49 @@ the machine flags what it cannot verify and a person decides — but it is worth
 machine did **not** refuse the note on its own. It counted it and warned. Nothing downstream would
 have stopped a promotion if the warning had gone unread.
 
+## 17. Resetting a demo means resetting the git history too
+
+Preparing a clean run of the same demonstration on a different stack took four attempts, and each
+failure was a place the knowledge had already been written down. Recorded because the same list is
+what anyone re-running these measurements has to clear, and because three of the four were mine.
+
+The agent under test found the answer without being told, and said where it got it:
+
+> *"AGENTS.md node rewrite dropped k5-k7 — check `git show 88d825f:AGENTS.md` before assuming a trap
+> was never noted."*
+
+**It read the git history.** The inbox had been emptied, the memory directory deleted, the working
+tree replaced and the stale branch removed — and the artifact from the previous stack was still
+reachable in `main`, because it had been committed there. Worse, the aggregator writes descriptive
+commit subjects, so `git log --oneline` alone spelled it out:
+
+> *chore(agent-knowledge): added [k7]: finance CSV must be `;`-delimited with `,` decimals for Excel
+> under vi-VN; default silently corrupts the send.*
+
+Those subjects are good for a reviewer and permanent for everyone else. A line deleted from the
+artifact is still in the history, which is worth knowing about `rejected.md` too: rejecting a fact
+removes it from what agents load, not from what they can find.
+
+The other three were self-inflicted:
+
+- **The work product got committed.** Squashing with `git add -A` picked up the `export.js` the test
+  session had just written — complete with a comment explaining the whole convention — plus a README
+  paragraph and a `package.json` script pointing at it.
+- **The config named the locale.** `config.json` carried `"locale": "vi-VN"`, which is one short step
+  from "Excel under vi-VN uses `;`". That made the entry derivable, which is precisely what the
+  removal test exists to refuse. Removed.
+- **Patching each leak as it appeared** found two more each round. Regenerating every file from the
+  generator, then diffing for the words that must not appear, ended it in one pass.
+
+What survives that cannot be removed: the item labels are Vietnamese, so an agent can infer the
+project's locale and may guess the semicolon. So the beat is not "did it use `;`" — it is whether it
+gets the **whole** set: the delimiter, the decimal pairing that makes `SUM()` silently return zero,
+the BOM, who opens the file, and what a wrong send cost. Only the first of those is guessable.
+
+The checklist, for next time: inbox and `events.jsonl`; every member's memory directory; the shared
+spool; the artifact clone on the host; `rejected.md` and `*.proposed`; remote branches; **the repo's
+own history**; and a grep of the working tree for the words the knowledge is made of.
+
 ## Designs that failed
 
 **Mining the transcript for moments something went wrong.** Parse the session transcript at `SessionEnd`,

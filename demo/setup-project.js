@@ -87,11 +87,11 @@ const SEEDED_ARTIFACT = `<!-- Maintained by claude-code-team-memory.
      rejection rather than proposing it again. -->
 
 ## Traps
-- (2 people) There is no \`HasQueryFilter\` on \`IsDeleted\` anywhere in \`CatalogContext\`, so every query has to filter it by hand — and by \`Category.IsDeleted\` too, or a live item in a retired category still shows. \`report\` returns all six rows when four are live. Nothing throws when you forget, so a smoke test that returns rows proves the query ran, not that it filtered. [k1]
-- (unconfirmed, 1 person) \`OrderBy(i => i.Price)\` sorts as text on SQLite, so \`100.00\` lands before \`42.00\`. Order in memory or store minor units instead. [k4]
+- (2 people) Nothing filters \`active: false\` anywhere. \`report\` lists all six items when four are live, and an inactive category does not hide its items either — check both. Nothing throws when you forget, so a smoke test that returns rows proves the query ran, not that it filtered. [k1]
+- (unconfirmed, 1 person) \`update.js\` rewrites the whole of \`data/catalog.json\` on every call, so two edits at the same time lose one of them. Serialise anything that writes that file. [k4]
 
 ## Decisions
-- (2 people) SQLite rather than SQL Server for local work, so a clone runs with no database server and no container. The provider difference shows up in decimal handling, so anything numeric gets checked against the real provider before it ships. [k2]
+- (2 people) Prices are stored as integer VND, never decimals. Floating point was tried and abandoned after totals drifted by a few dong on large carts; anything that formats a price divides at the edge, never in the data. [k2]
 
 ## Boundaries
 - (3 people) Commit messages follow conventional commits (\`feat:\`, \`fix:\`, \`chore:\`). CI rejects anything else, and the failure is a lint step that names no file. [k3]
@@ -146,59 +146,100 @@ function build(opts) {
     return { root, memoryDir: settingsPath(), warm, stack };
   }
 
-  w('package.json', JSON.stringify({ name: projectId, version: '1.0.0', private: true }, null, 2) + '\n');
+  // Node rather than .NET, decided on one fact: the laptop running the demo has no Python and the VM
+  // has no .NET, while node is on both. Nobody installs anything, and after §13 established that
+  // planted code traps get found by reading anyway, the stack no longer carries the argument — the
+  // knowledge does, and the CSV convention is the same in any language.
+  //
+  // Deliberately absent: any `export` command. Act 1 is the agent writing one and being corrected
+  // about the format, so the project has to arrive without it.
+  w('package.json', JSON.stringify({
+    name: projectId, version: '1.0.0', private: true, type: 'commonjs',
+    scripts: { report: 'node report.js', seed: 'node seed.js' },
+  }, null, 2) + '\n');
 
-  // Says less than the code does, which is how real repositories are. It lists both commands and
-  // does not say they are ordered — that gap IS trap T1.
+  // Says less than the code does, the way real repositories do.
   w('README.md', `# ${projectId}
 
-Node data tooling for the catalog service. Plain node, no build step.
+Catalog tooling for the storefront. Plain node, no build step, no database server — the store is a
+JSON file under \`data/\`.
 
-Scripts: \`node migrate.js\`, \`node seed.js\`, \`node update.js <id> <label>\`.
+    node seed.js                    load the starter catalog
+    node report.js                  list items with their category and price
+    node update.js <id> <label>     rename an item
 
-Config lives in \`config.json\`.
+Configuration is in \`config.json\`.
 `);
 
-  w('config.json', JSON.stringify({ locales: ['vi-VN', 'en-GB'], pageSize: 20 }, null, 2) + '\n');
+  // No `locale` key. It is the shortest path in the repository to the convention the demo's knowledge
+  // is about: an agent that reads `locale: vi-VN` and is asked for a CSV for the finance team can
+  // reason its way to a semicolon delimiter, which makes the entry derivable — exactly what the
+  // removal test refuses to keep. The Vietnamese item labels still make the project's locale obvious,
+  // so the `;` half may be guessable anyway; what is not is who opens the file, in what application,
+  // the decimal pairing that makes SUM() silently return 0, the BOM, and what a wrong send cost.
+  w('config.json', JSON.stringify({
+    currency: 'VND', pageSize: 20,
+  }, null, 2) + '\n');
 
-  w('data/records.json', JSON.stringify([
-    { id: 1, label: 'system-owner', locale: 'vi-VN', active: true, seed: true },
-    { id: 2, label: 'Ao thun co tron', locale: 'vi-VN', active: true },
-    { id: 3, label: 'Denim jacket', locale: 'en-GB', active: true },
-  ], null, 2) + '\n');
+  w('data/catalog.json', JSON.stringify({
+    categories: [
+      { id: 1, name: 'Áo', active: true },
+      { id: 2, name: 'Quần', active: true },
+      { id: 3, name: 'Hàng ngừng bán', active: false },
+    ],
+    items: [
+      { id: 1, categoryId: 1, label: 'Áo thun trơn', price: 189000, active: true },
+      { id: 2, categoryId: 1, label: 'Áo sơ mi linen', price: 459000, active: true },
+      { id: 3, categoryId: 1, label: 'Áo mẫu thử', price: 99000, active: false },
+      { id: 4, categoryId: 2, label: 'Quần jean', price: 720000, active: true },
+      { id: 5, categoryId: 2, label: 'Quần short', price: 265000, active: true },
+      { id: 6, categoryId: 3, label: 'Áo khoác cũ', price: 1250000, active: true },
+    ],
+  }, null, 2) + '\n');
 
-  w('migrate.js', `${INVOCATION_LOG}
-fs.writeFileSync(path.join(__dirname, '.state', 'schema.json'), JSON.stringify({ version: 2 }));
-console.log('migrated: schema v2');
+  w('lib.js', `const fs = require('fs');
+const path = require('path');
+
+const file = path.join(__dirname, 'data', 'catalog.json');
+const load = () => JSON.parse(fs.readFileSync(file, 'utf8'));
+const save = (d) => fs.writeFileSync(file, JSON.stringify(d, null, 2) + '\\n');
+const config = () => JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
+
+module.exports = { load, save, config };
 `);
 
-  // T1: the message names a foreign key and the real cause is a missing schema file.
   w('seed.js', `${INVOCATION_LOG}
-if (!fs.existsSync(path.join(__dirname, '.state', 'schema.json'))) {
-  console.error('Error: SQLITE_CONSTRAINT: FOREIGN KEY constraint failed (items.category_id -> categories.id)');
-  process.exit(1);
-}
-fs.writeFileSync(path.join(__dirname, '.state', 'seeded.json'), JSON.stringify({ items: 8 }));
-console.log('seeded: 8 items');
+const { load } = require('./lib');
+const d = load();
+console.log('catalog ready: ' + d.categories.length + ' categories, ' + d.items.length + ' items');
 `);
 
-  // T2: refusing the write, and saying why, is the only place this rule exists.
-  w('update.js', `${INVOCATION_LOG}
-const [id, ...rest] = process.argv.slice(2);
-const p = path.join(__dirname, 'data', 'records.json');
-const rows = JSON.parse(fs.readFileSync(p, 'utf8'));
+  w('report.js', `${INVOCATION_LOG}
+const { load } = require('./lib');
+const d = load();
+const byId = Object.fromEntries(d.categories.map(c => [c.id, c]));
 
-if (Number(id) === 1) {
-  console.error('Refused: record 1 is the seed owner row. Overwriting its label detaches every');
-  console.error('Refused: other row from its owner and the catalog stops resolving locales.');
-  console.error('Refused: no migration repairs it — restore from the data/ backup instead.');
-  process.exit(1);
+console.log('id  category            item                      price');
+for (const it of d.items) {
+  console.log(
+    String(it.id).padEnd(4) +
+    (byId[it.categoryId] ? byId[it.categoryId].name : '?').padEnd(20) +
+    it.label.padEnd(26) +
+    String(it.price).padStart(9)
+  );
 }
-const row = rows.find(r => r.id === Number(id));
-if (!row) { console.error('no such record: ' + id); process.exit(1); }
+console.log('\\n' + d.items.length + ' row(s)');
+`);
+
+  w('update.js', `${INVOCATION_LOG}
+const { load, save } = require('./lib');
+const [id, ...rest] = process.argv.slice(2);
+const d = load();
+const row = d.items.find(r => r.id === Number(id));
+if (!row) { console.error('no item with id ' + id); process.exit(1); }
 row.label = rest.join(' ');
-fs.writeFileSync(p, JSON.stringify(rows, null, 2) + '\\n');
-console.log('updated record ' + id);
+save(d);
+console.log('updated item ' + id);
 `);
 
   writeClaudeFiles();
