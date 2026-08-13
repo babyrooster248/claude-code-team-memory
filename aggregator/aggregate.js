@@ -399,11 +399,17 @@ if (has('commit') && file.trim() === current.trim()) {
 
   // Branch first, then write. Creating the file after the branch switch removes the stash dance
   // the previous version needed, and with it a step that could fail halfway.
+  //
+  // `-B` rather than reusing wherever the branch already points. The previous version checked the name
+  // out if it existed, and a branch left over from an earlier day — or from before the artifact repo's
+  // history was rewritten — is not based on the current main. The observed result was a pull request
+  // whose diff added back an entire previous version of the project and deleted the current one. That
+  // reads as a catastrophe and is really just a stale base.
+  //
+  // Resetting it costs nothing: every run writes the WHOLE artifact, so an earlier proposal on that
+  // branch carries no content this commit lacks.
   const branch = 'agent-knowledge/' + new Date().toISOString().slice(0, 10);
-  if (!gate.auto) {
-    if (git(['rev-parse', '--verify', '--quiet', branch], { probe: true }).status === 0) git(['checkout', branch]);
-    else git(['checkout', '-b', branch]);
-  }
+  if (!gate.auto) git(['checkout', '-B', branch]);
 
   fs.copyFileSync(proposal, artifact);
   fs.writeFileSync(msgFile, subject + (body && body !== subject.slice(24) ? '\n\n' + body : '') + '\n');
@@ -429,7 +435,10 @@ if (has('commit') && file.trim() === current.trim()) {
   // nobody ever reads. Opt-in, because the manual path should not suddenly start pushing.
   if (has('push')) {
     const cur = git(['rev-parse', '--abbrev-ref', 'HEAD']).stdout.trim();
-    const p = git(['push', '--set-upstream', 'origin', cur], { probe: true });
+    // --force-with-lease because the branch is reset to the current base on every run, so its remote
+    // copy legitimately diverges. Lease rather than plain force: if someone else pushed to that branch
+    // in the meantime, the push fails loudly instead of overwriting them.
+    const p = git(['push', '--force-with-lease', '--set-upstream', 'origin', cur], { probe: true });
     if (p.status === 0) {
       console.log(`pushed ${cur} to origin`);
     } else {
