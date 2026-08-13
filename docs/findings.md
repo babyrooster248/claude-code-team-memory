@@ -1140,12 +1140,19 @@ Simulating a second member locally — second credential, second Claude account,
 into three shared-per-machine resources. Two were anticipated; the third was not, and it invalidated
 the run.
 
-**`autoMemoryDirectory` in `settings.local.json` does not override `settings.json`.** The second
-clone was given a separate memory directory that way, and Claude Code ignored it: the second
-session's notes went straight into the first member's directory, and — worse for the test — the
-second agent could *read* the first member's notes. That destroys the thing the run was meant to
-measure, because the knowledge could have come from memory rather than from the shared artifact.
-Overriding the key in the clone's own `settings.json` is what works.
+**Both clones inherit the same committed `autoMemoryDirectory`, so on one machine they collide.**
+`~/agent-knowledge/catalog-svc` is the right value: it is relative to each person's home, which is a
+different directory on a different machine, which is the case it was designed for. Put two members on
+one machine and both resolve to the same folder — so the second session wrote into the first member's
+memory and, worse for the test, could *read* the first member's notes. The knowledge could then have
+come from memory rather than from the shared artifact, which is the thing the run existed to measure.
+
+A correction belongs here, because the first version of this section asserted something false. It
+claimed `settings.local.json` does not override `autoMemoryDirectory`. It may or may not — **it was
+never tested**. What actually happened is that the override was written into a clone in a temporary
+directory while the session ran from a different clone entirely, and a product behaviour was inferred
+from the gap. Fixing a copy and drawing a conclusion about the original is the same mistake as
+reading one line of a log and calling it a diagnosis, which this project has now made four times.
 
 **The spool is per-machine, not per-identity.** `~/.agent-knowledge-spool` is shared, so a note
 queued by one member is flushed by whichever session runs next — **with that session's credential**.
