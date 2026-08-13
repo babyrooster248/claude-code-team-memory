@@ -56,6 +56,13 @@ for (const bad of ['(verified, 4 people)', '(2 people, confirmed)', '(likely 2 p
     run(HEAD + entry(bad, 'k1') + STATE('k1')).code, 1);
 }
 
+// A reviewer on Windows hands this file back with CRLF endings. It is not damage, and reporting it
+// as damage is worse than useless — the checker once read a perfectly good artifact as having no
+// state block at all, because every "k1: ..." line ended in a carriage return.
+const crlf = run((HEAD + entry('(2 people)', 'k1') + STATE('k1')).split('\n').join('\r\n'));
+check('CRLF line endings are not damage', crlf.code, 0);
+check('and the state block is still seen', /1 state lines/.test(crlf.out), true);
+
 // An orphaned state line is real damage: the count exists with nothing to attach it to.
 check('state line with no entry is an ERROR',
   run(HEAD + entry('(2 people)', 'k1') + `\n<!-- knowledge-state\nk1: aaaa1111\nk9: bbbb2222\n-->\n`).code, 1);

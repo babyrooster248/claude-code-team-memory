@@ -23,7 +23,11 @@ if (!fs.existsSync(file)) { console.error(`file not found: ${file}`); process.ex
 
 const MARKER = /^\(\s*(?:unconfirmed\s*,\s*)?(\d+)\s*(?:person|people)\s*\)/i;
 const shortHash = s => crypto.createHash('sha1').update(s).digest('hex').slice(0, 8);
-const text = fs.readFileSync(file, 'utf8');
+// Carriage returns are stripped before anything looks at the text. A reviewer edits this file on
+// Windows, and a checkout without the right .gitattributes hands it back with CRLF endings — which
+// made every state line fail to parse and the checker report an artifact with no contributor counts
+// at all. It was reporting damage that was not there, on a file that was fine.
+const text = fs.readFileSync(file, 'utf8').replace(/\r\n?/g, '\n');
 
 // Same tolerance as the aggregator: skip comment blocks without ever stopping, and never drop a
 // bullet silently. Kept as its own copy so this check can run in a CI job that has nothing but

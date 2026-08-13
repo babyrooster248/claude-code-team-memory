@@ -257,6 +257,22 @@ console.log('updated record ' + id);
     }
     w('.claude/settings.json', JSON.stringify(settings, null, 2) + '\n');
 
+    // Inherited from the tool's own repository, and for the same reason: this project vendors
+    // `hooks/*.sh`, and a CRLF checkout breaks them outright on any machine without Node — the
+    // shebang line ends in a carriage return and the kernel looks for an interpreter that does not
+    // exist. Generating a project without this was a real gap, found when a Windows checkout turned
+    // the artifact into CRLF and the checker stopped seeing its own state block.
+    w('.gitattributes', [
+      '# LF everywhere. hooks/*.sh are why: a CRLF checkout makes them unrunnable on Linux and macOS,',
+      '# which are exactly the machines that rely on the shell sender because they have no Node.',
+      '* text=auto eol=lf',
+      '*.sh text eol=lf',
+      '# AGENTS.md is edited by reviewers on Windows and parsed by the pipeline. Pinning it to LF keeps',
+      '# a hand edit from silently changing every line in the diff.',
+      'AGENTS.md text eol=lf',
+      '',
+    ].join('\n'));
+
     // The credential is deliberately NOT written. Each member copies the sample once; a generator
     // that wrote it would put a token into whatever the generated tree gets committed to.
     w('.gitignore', [
