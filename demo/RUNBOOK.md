@@ -16,9 +16,9 @@ comes out monolingual English, because the file is read by everyone who will eve
 | Host | `systemctl --user status agent-knowledge-ingest` → active. From your laptop: `curl -s https://<host>/health` → `{"ok":true}` |
 | Journal | `journalctl --user -u agent-knowledge-ingest -f` open in a second terminal, large font, left running all session |
 | Second member on ONE machine | Only if you cannot get a real second machine, and then: give that clone a different `autoMemoryDirectory`. Both clones inherit the same committed value, which is correct across machines and collides on one — the second agent otherwise writes into, and reads, the first member's memory. Check `~/.agent-knowledge-spool` is empty first: it is shared per machine, so a queued note is flushed with whichever credential runs next. Expect the "one Claude account, two credentials" warning unless you also switch Claude accounts |
-| Colleague | Their clone exists, `.claude/agent-knowledge.env` filled in, and **they have opened Claude Code in that directory once and accepted the trust dialog**. Skip this and act 5 dies: an untrusted workspace ignores `permissions.allow`, every Bash call is denied, and the agent cannot run `dotnet` at all |
-| .NET | `dotnet --version` on both machines. The host needs none |
-| Fresh state | `node demo/setup-project.js --dest <path> --stack dotnet --seeded --ingest https://<host> --project catalog-svc` |
+| Colleague | Their clone exists, `.claude/agent-knowledge.env` filled in, and **they have opened Claude Code in that directory once and accepted the trust dialog**. Skip this and act 5 dies: an untrusted workspace ignores `permissions.allow`, every Bash call is denied, and the agent cannot run `node` at all |
+| Node | `node --version` on both machines. The sample project is plain node with no dependencies, so there is nothing to install and nothing to fail in the room |
+| Fresh state | `node demo/setup-project.js --dest <path> --stack node --ingest https://<host> --project catalog-svc` — no `--seeded`: the demo starts with **no** `AGENTS.md` at all, so the first entry the room sees is the one act 1 captured. See findings §17 for everything a reset has to include, the repo's own git history included |
 
 ## Act 1 — the correction, live (6')
 
@@ -32,7 +32,7 @@ and it is captured without anyone asking for it.
 Thêm lệnh export để xuất report ra file CSV, tôi cần gửi cho bên tài chính.
 ```
 
-The agent writes it with `InvariantCulture`, a `,` delimiter and `.` decimals. **Say out loud that
+The agent writes a `,` delimiter and `.` decimals — the invariant defaults. **Say out loud that
 this is the correct answer from reading the code** — it matters that the audience sees the agent do
 something reasonable rather than something stupid.
 
@@ -82,7 +82,9 @@ Still nothing to type. The 90-second window elapsed during act 2, so the run has
 journal carries its whole output, prefixed `[trigger:catalog-svc]`.
 
 **Beat landed if:** exactly **one** run appears for the note, the per-note `KEEP`/`DROP` lines carry
-reasons, the gate says `NEEDS A PERSON`, and a branch `agent-knowledge/<date>` was committed.
+reasons, the gate says `NEEDS A PERSON`, and the branch `agent-knowledge` was committed, pushed, and — if `prCommand` is configured on the host — the pull request is already open with nobody having clicked anything.
+
+The branch name is fixed, not dated, so there is **at most one open request** for the artifact: a later run adds a commit to the request already under review rather than opening a competing one. That rule cost two wrong pull requests to learn; findings §18 has both.
 
 **Measured on this host: 81s and 68s** on 958 MB of RAM. That fits inside act 2, so by the time you
 look, the run has finished. Two runs is also normal and worth pointing at — notes arriving while the

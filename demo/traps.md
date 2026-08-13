@@ -11,9 +11,9 @@ things that did not work.
 
 A line an agent can derive by reading the code fails that test. The first version of this demo ignored
 it and planted three technical traps in the sample project. Measured over three sessions, **a capable
-agent found them unaided**: it read `OnModelCreating`, saw no `HasQueryFilter`, and worked out that
-four of six rows were live — the same conclusion an agent holding the artifact reached. In six source
-files nothing is hidden.
+agent found them unaided**: it read the query path, saw that nothing filtered deleted rows, and worked
+out that four of six were live — the same conclusion an agent holding the artifact reached. In six
+source files nothing is hidden.
 
 So the demo does not pretend the artifact helps with anything the codebase states. It carries the
 knowledge that is genuinely unavailable to a model: **who consumes the output, and what happened the
@@ -25,8 +25,8 @@ last time somebody got it wrong.**
 
 | | |
 | --- | --- |
-| What an agent writes unprompted | `InvariantCulture`, `,` delimiter, `.` decimals. Reading the code, this is the correct answer |
-| What the project needs | `;` delimiter, `,` decimals from a pinned `vi-VN` culture, UTF-8 **with** BOM, quoting keyed on `;` |
+| What an agent writes unprompted | A `,` delimiter and `.` decimals — the invariant defaults, and reading the code, the correct answer |
+| What the project needs | `;` delimiter, `,` decimals, UTF-8 **with** BOM, quoting keyed on `;` |
 | Why no model can know | It depends on which application opens the file, in which locale, and on the fact that a previous wrong send cost a full redo of the monthly report |
 | How it fails | Silently, and only on the recipient's machine. `42.00` arrives in vi-VN Excel as text, and `SUM()` returns 0. The file looks perfect in a terminal |
 
@@ -59,14 +59,15 @@ to invariant for files a person opens.
 
 ## What the sample project still provides
 
-The .NET console app is no longer where the knowledge lives, but it still has to be a real project
-with real failures, or there is nothing to work on. Three remain, and their role has changed:
+The sample project — plain node, no dependencies, so nothing to install in the room — is no longer
+where the knowledge lives, but it still has to be a real project with real failures or there is
+nothing to work on. Three remain, and their role has changed:
 
 | | Behaviour | Role now |
 | --- | --- | --- |
-| `seed` before `migrate` | Fails with *"could not read the catalog store. Check ConnectionStrings:Catalog"* — a caught exception blaming configuration | Background realism. **Do not build a beat on it**: agents ran `migrate` first in every session observed |
-| `update <id> <label>` | Prints success, writes nothing. `AsNoTracking()` on a write path | Found unaided by agents, twice, incidentally. Useful as an *entry* the artifact carries, not as a live surprise |
-| `report` | Returns soft-deleted rows; no `HasQueryFilter` anywhere | Same. Found unaided in both arms |
+| `seed` before `migrate` | Fails blaming configuration rather than the missing store — a caught error pointing one layer away from the cause | Background realism. **Do not build a beat on it**: agents ran `migrate` first in every session observed |
+| `update <id> <label>` | Prints success, writes nothing — the write path never persists | Found unaided by agents, twice, incidentally. Useful as an *entry* the artifact carries, not as a live surprise |
+| `report` | Returns soft-deleted rows; nothing filters them out | Same. Found unaided in both arms |
 
 The agent that had the artifact used the `update` entry to avoid setting up test data with a command
 it knew to be broken. That is the artifact earning its place on a technical entry — not by revealing
@@ -85,10 +86,10 @@ It survives as a **deliberately stale entry** in the pre-seeded artifact, so a s
 one capture trigger nothing else does — finding that an existing note is now wrong — and so the demo
 has something honest to say about the problem this project cannot solve.
 
-**`dotnet ef` writing to a different database than the app.** Modelled on a real note about a
-containerised app where host tool and container app genuinely disagree. Here they agree:
-`AppContext.BaseDirectory` resolves to the same output directory at design time and run time. Contriving
-a split would teach the audience to discount the traps that are real.
+**A migration tool writing to a different store than the app reads.** Modelled on a real note about a
+containerised app where the host tool and the container app genuinely disagree. Here they agree — both
+resolve the same path relative to the project — and contriving a split would teach the audience to
+discount the traps that are real.
 
 ## One detail that keeps the sample honest
 

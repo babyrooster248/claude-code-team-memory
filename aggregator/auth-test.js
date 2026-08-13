@@ -14,7 +14,11 @@ const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'authtest-'));
-const PORT = 8837;
+// 0, not a number somebody picked. A fixed port made this suite fail nine cases at once whenever a
+// listener from the previous run had not let go of it yet — and fail as "the product is broken",
+// because every request simply got connection-refused. The OS hands out a free one; the endpoint
+// prints which, and PORT is read back from that line below.
+let PORT = 0;
 
 const mk = (email) => {
   const token = 'tok-' + crypto.randomBytes(6).toString('hex');
@@ -84,7 +88,14 @@ const events = (dir) => {
 };
 
 (async () => {
-  for (let i = 0; i < 60 && !/listening/.test(serverLog); i++) await new Promise(r => setTimeout(r, 100));
+  for (let i = 0; i < 60 && !/listening|FATAL/.test(serverLog); i++) await new Promise(r => setTimeout(r, 100));
+  const bound = serverLog.match(/listening on [^:]+:(\d+)/);
+  if (!bound) {
+    console.error('the endpoint never started, so nothing below would have tested the product:\n' +
+                  (serverLog.trim() || '(no output at all)'));
+    process.exit(1);
+  }
+  PORT = Number(bound[1]);
 
   let fails = 0;
   let ran = 0;   // counted, not hard-coded: a stale total silently under-reports the suite

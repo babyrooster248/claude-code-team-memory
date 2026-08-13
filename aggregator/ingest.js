@@ -453,7 +453,7 @@ function scheduleAggregate(projectId, project, paths) {
   aggLog(projectId, `note accepted — aggregate in ${cfg.quietSeconds}s unless another arrives first`);
 }
 
-http.createServer((req, res) => {
+const server = http.createServer((req, res) => {
   const send = (code, obj, headers) => {
     res.writeHead(code, Object.assign({ 'Content-Type': 'application/json' }, headers || {}));
     res.end(JSON.stringify(obj));
@@ -517,7 +517,25 @@ http.createServer((req, res) => {
     // acknowledged whether or not anything downstream is configured to act on it.
     if (auth.projectId) scheduleAggregate(auth.projectId, auth.project, auth.paths);
   });
-}).listen(port, bind, () => console.error(
-  `[ingest] listening on ${bind}:${port} — ` +
-  (config ? `${Object.keys(config.projects || {}).length} project(s), Basic auth required`
-          : `single project, NO AUTH, ${LEGACY.out}`)));
+});
+
+// Report the port the OS actually gave us, not the one asked for. They differ whenever the request
+// was 0 — which is how a test avoids fighting a listener a previous run left behind, and how the
+// EADDRINUSE that produced nine unexplained failures stops being possible.
+server.on('listening', () => {
+  const a = server.address();
+  console.error(`[ingest] listening on ${bind}:${a.port} — ` +
+    (config ? `${Object.keys(config.projects || {}).length} project(s), Basic auth required`
+            : `single project, NO AUTH, ${LEGACY.out}`));
+});
+
+// And say so out loud when it cannot listen at all. Without this the process died with a stack trace
+// on stderr that a test waiting for the word "listening" spun past, then reported every case as a
+// product failure — the loudest possible signal about the wrong thing.
+server.on('error', (e) => {
+  console.error(`[ingest] FATAL: cannot listen on ${bind}:${port} — ${e.code || e.message}` +
+    (e.code === 'EADDRINUSE' ? ' (something else is already on that port)' : ''));
+  process.exit(1);
+});
+
+server.listen(port, bind);

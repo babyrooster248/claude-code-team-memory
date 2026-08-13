@@ -20,7 +20,9 @@ const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'trigger-'));
-const PORT = 8851;
+// 0: see auth-test. A fixed port turns "the previous run's listener is still there" into a dozen
+// failures that all point at the product instead of at the harness.
+let PORT = 0;
 const QUIET = 2; // seconds — the real default is 120, and a test that waited that long is a test nobody runs
 
 const TOKEN = 'tok-' + crypto.randomBytes(6).toString('hex');
@@ -150,7 +152,14 @@ const check = (name, got, want) => {
 };
 
 (async () => {
-  for (let i = 0; i < 80 && !/listening/.test(log); i++) await sleep(100);
+  for (let i = 0; i < 80 && !/listening|FATAL/.test(log); i++) await sleep(100);
+  const bound = log.match(/listening on [^:]+:(\d+)/);
+  if (!bound) {
+    console.error('the endpoint never started, so nothing below would have tested the trigger:\n' +
+                  (log.trim() || '(no output at all)'));
+    process.exit(1);
+  }
+  PORT = Number(bound[1]);
 
   // --- one note, two hooks: the shape every real session produces ---------------------------
   await postNote('with-trigger');
@@ -170,7 +179,13 @@ const check = (name, got, want) => {
   // --- a note landing mid-run ----------------------------------------------------------------
   fs.writeFileSync(path.join(tmp, 'runs.log'), '');
   await postNote('with-trigger', 'x1.md');
-  await sleep(QUIET * 1000 + 300);          // run is now in flight, stub sleeps 1200ms
+  // Wait for the run to ACTUALLY start, rather than sleeping past the quiet window and assuming it
+  // did. This used to be `sleep(QUIET + 300ms)`, which held on an idle machine and failed under the
+  // full suite: the debounce timer slipped past a 300ms margin, so the two notes below landed before
+  // the run instead of during it and coalesced into it — reporting a single-flight bug that was not
+  // there. A flaky test on the trigger is worse than no test, because the next real failure here
+  // gets waved off as the flake.
+  for (let i = 0; i < 200 && runs().length === 0; i++) await sleep(50);
   check('run in flight', runs().length, 1);
   await postNote('with-trigger', 'x2.md');
   await postNote('with-trigger', 'x3.md');  // two more while it runs
