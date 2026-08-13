@@ -109,10 +109,35 @@ project's `aggregate.repo`.
 Two things to settle before switching `push: true` on:
 
 - **Push access from the host.** `aggregate.js --commit` builds a branch and commits, and `--push`
-  is what makes a pull request appear. Use a deploy key scoped to that one repository, not a personal
+  is what sends it to origin. Use a deploy key scoped to that one repository, not a personal
   credential. This project refuses git as the *transport* because that needs a credential on every
   member's laptop; a scoped key on a managed host is a different thing, and worth saying out loud
   before someone points at the apparent contradiction.
+- **Opening the request, if you want that too.** A deploy key cannot do it: opening a pull request is
+  a forge API call and a deploy key is a git credential. So it is a second, separate token — for
+  GitHub, a fine-grained PAT limited to the one repository with *pull requests: read and write* — and
+  it is handed to `prCommand`, the team's own command, rather than to anything in this codebase. The
+  tool never learns what a forge is, which is why it works on a git host that has no web interface.
+
+  ```json
+  "prCommand": "GH_TOKEN=$(cat /home/you/.gh-token) /home/you/bin/gh pr create --repo you/project --base main --head BRANCH --fill"
+  ```
+
+  `BRANCH` is substituted. Read the token from a file inside the command rather than putting it in
+  the service environment: rotating it is then writing a file, with no unit to edit and no
+  `daemon-reload`. Absolute path to `gh`, because the unit sets an explicit `PATH` and `~/bin` is
+  not on it.
+
+  Omit `prCommand` entirely and nothing breaks — the run prints the compare URL that the push itself
+  returned, and a person clicks it. What you must not do is leave it configured with a dead token:
+  that is the one path nothing retries, because the branch reaches origin either way, so every later
+  run correctly declines to open a request for one that was never opened. The run says so loudly; the
+  point is that somebody has to read it.
+
+  The proposal always goes on one branch, `agent-knowledge`, so there is at most one open request for
+  the artifact. A run whose branch origin already has adds a commit to the request under review
+  instead of opening a competing one — `git ls-remote` decides that, asked before the push, because
+  afterwards the answer is always yes.
 - **Version parity.** Every filter figure in `docs/findings.md` was measured on a particular Claude
   Code version, and §3 exists because a number without its version is a slogan. If the host runs an
   older build than the one the numbers came from, either upgrade it or re-measure on it.

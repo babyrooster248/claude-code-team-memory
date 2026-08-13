@@ -33,6 +33,13 @@ Thumbs.db
 # ids and inbox paths of every team using the host. config.sample.json is the committed shape.
 aggregator/config.json
 
+# Anything that is a live credential on THIS machine and nowhere else: host tokens, forge tokens,
+# copies of what was handed to a member. Ignored as a whole directory rather than by filename,
+# because the failure this prevents is somebody adding a second file next to the first and it not
+# matching the pattern. Nothing in here is ever committed; if it needs to survive a fresh clone, it
+# belongs in a password manager, not in git.
+.secrets/
+
 # Member-side credential. Copied from hooks/agent-knowledge.env.sample and filled in once. This is
 # the one secret on a member's machine, and it must never be the thing that gets committed by
 # reflex — hence a name that does not look like an ordinary .env.
