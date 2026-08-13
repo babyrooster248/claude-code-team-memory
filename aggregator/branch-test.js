@@ -180,7 +180,22 @@ const commit = (g, text, msg) => {
     out.log.some(l => /will not try again/.test(l)), true);
 }
 
-// --- 8. no remote at all -----------------------------------------------------------------------
+// --- 8. the auto-applied path pushes, and opens nothing ---------------------------------------
+//
+// A confidence change commits on the current branch — usually main — because it carries no decision.
+// It still has to reach origin, or it "applies itself" into a clone nobody reads.
+{
+  const r = repo('publish-auto');
+  let ran = false;
+  commit({ work: r.work, g: r.g }, '# base\n(2 people) x\n', 'chore(agent-knowledge): promote');
+  const out = publish({ git: r.g, prCommand: null, run: () => { ran = true; return { status: 0 }; } });
+  check('auto-apply on main → pushed, no request', out.state, 'pushed');
+  check('and no forge command ran', ran, false);
+  check('the commit did reach origin',
+    r.g(['rev-parse', 'origin/main']).stdout.trim(), r.g(['rev-parse', 'HEAD']).stdout.trim());
+}
+
+// --- 9. no remote at all -----------------------------------------------------------------------
 //
 // The host clone was local-only for a while, and a push failure there must not look like success.
 {
