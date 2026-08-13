@@ -1221,6 +1221,62 @@ The checklist, for next time: inbox and `events.jsonl`; every member's memory di
 spool; the artifact clone on the host; `rejected.md` and `*.proposed`; remote branches; **the repo's
 own history**; and a grep of the working tree for the words the knowledge is made of.
 
+## 18. Two wrong pull requests, from nine lines nothing covered
+
+The pipeline had a test suite of eight files and 118 cases, and the piece that decided what the
+reviewer actually sees — which branch the proposal goes on — had none. It produced two wrong pull
+requests before anyone looked.
+
+**The first: a diff that deleted the whole project.** The proposal branch was picked up by name if it
+existed. That branch was left over from before the demo repo's history was rewritten, so its base
+commit no longer existed anywhere in `main`. Committing on top of it produced a request whose diff
+added back an entire previous version of the project (the .NET sample that had been replaced) and
+deleted the current one. Every log line said success. It was found only because the user asked why no
+pull request had appeared — the one that had appeared was so wrong it did not look like ours.
+
+**The second: two requests for one file.** The branch name carried the date, so a second day of notes
+opened a second request while the first was still under review — two proposals editing `AGENTS.md`,
+each conflicting with the other, and a reviewer with no way to know which to read. Nobody hit this
+one in practice; the user saw it coming and asked for at most one request, which is the only reason it
+is a finding and not an incident.
+
+The fix is one branch name for the life of the repository, and one question deciding what happens to
+it: **is it still based on the commit we are proposing against?** Still on top of it, keep committing
+and the open request grows. The base moved past it, rebuild from the base — which costs nothing,
+because every run writes the whole artifact, so the rebuilt commit contains everything the earlier
+proposal had.
+
+The subtler half is *whether to open a request at all*, and it must be asked **before** the push,
+because afterwards the answer is always yes:
+
+```
+origin already had this branch  →  add a commit to the request that exists
+origin did not                  →  this is a new proposal; open one
+```
+
+`git ls-remote` answers that. Asking the forge "is a request open?" would need the API this project
+deliberately never calls — the same reason it runs on a git host with no web interface at all. Which
+also means the push output is where the link comes from: forges print "create a pull request by
+visiting …" on the push itself, so reading it out of the output beats constructing it, and on a host
+that prints nothing there is simply nothing to find.
+
+That leaves one path nothing retries, and it has to be loud: if the command that opens the request
+fails, the branch is already on origin, so **every later run will correctly decline to open a request
+for one that was never opened**. Silence there would be a proposal that exists on the remote and in
+nobody's review queue.
+
+Three things this cost that are worth naming:
+
+- **`node --check` and a green suite both passed** while the decision was wrong, because it is not a
+  syntax question and nothing exercised it. What proved the new test was worth having was putting the
+  old logic back: 6 of 26 cases fail, including the one that reproduces the deleted-project diff.
+- **A silent failure needs a witness, not a log line.** Both bugs logged success. The output a human
+  reads is the pull request, and nobody was reading it.
+- **Nine lines of git plumbing is exactly the size that gets written inline** and therefore stays
+  untested. Extracting it into `branch.js` was not cleanliness; it was the only way to drive it
+  through create / continue / rebuild / rewritten-history against real repositories without spending
+  a model call.
+
 ## Designs that failed
 
 **Mining the transcript for moments something went wrong.** Parse the session transcript at `SessionEnd`,

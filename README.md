@@ -155,7 +155,16 @@ node aggregator/aggregate.js \
 ```
 
 Without `--commit` nothing is touched: the proposal lands beside the artifact as
-`AGENTS.md.proposed`. With it, you get a branch and a commit to open a PR from.
+`AGENTS.md.proposed`. With it, you get a branch and a commit to open a PR from. Add `--push` to send
+that branch to `origin`, and `--pr-command 'gh pr create --fill --base main --head BRANCH'` to have
+the request opened too — your command, your credential, your forge; `BRANCH` is substituted.
+
+The proposal always goes on **one** branch, `agent-knowledge`, so there is at most one open request
+for the artifact. A run whose branch `origin` already has adds a commit to the request under review
+instead of opening a competing one; a run whose branch has fallen behind the base rebuilds it, which
+costs nothing because every run writes the whole file. Both halves of that live in
+`aggregator/branch.js`, and [findings §18](docs/findings.md) is the two wrong pull requests that
+bought the rule.
 
 ## How it works
 
