@@ -16,10 +16,10 @@ LOG="${TMPDIR:-/tmp}/agent-knowledge-hook.log"
 MAX=25
 log() { printf '%s [flush] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOG" 2>/dev/null || true; }
 
+# Resolved with the credential below, because both may live in .claude/agent-knowledge.env. Checked
+# after the pruning, so a member who has configured neither still gets their spool bounded.
 ingest="${AGENT_KNOWLEDGE_INGEST:-}"
-[ -n "$ingest" ] || exit 0
 [ -d "$SPOOL" ] || exit 0
-ingest="${ingest%/}"
 
 # Bound the spool, before the credential check for the same reason the node flusher does: a member
 # who never copies the env file is the longest-lived version of this state. Loud on every discard —
@@ -55,13 +55,17 @@ while [ "$i" -lt 24 ]; do
   if [ -f "$f" ]; then
     [ -n "$ak_user" ] || ak_user="$(sed -n 's/^[[:space:]]*AGENT_KNOWLEDGE_USER[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$f" | tr -d '\r' | head -1)"
     [ -n "$ak_token" ] || ak_token="$(sed -n 's/^[[:space:]]*AGENT_KNOWLEDGE_TOKEN[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$f" | tr -d '\r' | head -1)"
+    [ -n "$ingest" ] || ingest="$(sed -n 's/^[[:space:]]*AGENT_KNOWLEDGE_INGEST[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$f" | tr -d '\r' | head -1)"
   fi
-  [ -n "$ak_user" ] && [ -n "$ak_token" ] && break
+  [ -n "$ak_user" ] && [ -n "$ak_token" ] && [ -n "$ingest" ] && break
   up="$(dirname "$d")"
   [ "$up" = "$d" ] && break
   d="$up"
   i=$((i + 1))
 done
+
+[ -n "$ingest" ] || exit 0
+ingest="${ingest%/}"
 
 # Leave the spool alone rather than spend it on 401s. Waiting for a setup step is recoverable.
 if [ -z "$ak_user" ] || [ -z "$ak_token" ]; then

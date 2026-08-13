@@ -21,8 +21,7 @@ const MAX_PER_RUN = 25;
 
 const log = m => { try { fs.appendFileSync(LOG, `${new Date().toISOString()} [flush] ${m}\n`); } catch {} };
 
-const ingest = process.env.AGENT_KNOWLEDGE_INGEST;
-if (!ingest || !fs.existsSync(SPOOL)) process.exit(0);
+if (!fs.existsSync(SPOOL)) process.exit(0);
 
 // Bound the spool. 403 now covers the wrong-project case, but other permanent failures do not
 // announce themselves — an endpoint URL that is wrong for good just refuses the connection every
@@ -57,31 +56,42 @@ try {
 } catch (e) { log(`spool prune failed: ${String(e.message).slice(0, 120)}`); }
 
 // The credential is read here rather than replayed from the spool, because the spool deliberately
-// does not hold it. Walks up from the session directory for the same reason the sender does.
-function credential(startDir) {
+// does not hold it. The endpoint is read the same way, so a public repository can commit nothing but
+// the project id and keep the host's address out of git history. Walks up from the session directory
+// for the same reason the sender does.
+function localSettings(startDir) {
   let user = process.env.AGENT_KNOWLEDGE_USER || '';
   let token = process.env.AGENT_KNOWLEDGE_TOKEN || '';
+  let ingest = process.env.AGENT_KNOWLEDGE_INGEST || '';
   let dir = path.resolve(startDir);
-  for (let i = 0; i < 24 && (!user || !token); i++) {
+  for (let i = 0; i < 24 && (!user || !token || !ingest); i++) {
     try {
       for (const line of fs.readFileSync(path.join(dir, '.claude', 'agent-knowledge.env'), 'utf8').split('\n')) {
-        const m = /^\s*(AGENT_KNOWLEDGE_USER|AGENT_KNOWLEDGE_TOKEN)\s*=\s*(.*?)\s*$/.exec(line);
+        const m = /^\s*(AGENT_KNOWLEDGE_USER|AGENT_KNOWLEDGE_TOKEN|AGENT_KNOWLEDGE_INGEST)\s*=\s*(.*?)\s*$/.exec(line);
         if (!m || !m[2]) continue;
         if (m[1].endsWith('USER')) user = user || m[2];
-        else token = token || m[2];
+        else if (m[1].endsWith('TOKEN')) token = token || m[2];
+        else ingest = ingest || m[2];
       }
     } catch { /* absent: keep walking */ }
     const up = path.dirname(dir);
     if (up === dir) break;
     dir = up;
   }
-  if (!user || !token) return null;
-  return 'Basic ' + Buffer.from(`${user}:${token}`, 'utf8').toString('base64');
+  return {
+    ingest,
+    auth: (user && token)
+      ? 'Basic ' + Buffer.from(`${user}:${token}`, 'utf8').toString('base64')
+      : null,
+  };
 }
 
 // No credential means the notes stay spooled. Exiting here rather than sending is the difference
 // between "waiting for a one-time setup step" and "every queued note burned on a 401".
-const AUTH = credential(process.env.CLAUDE_PROJECT_DIR || process.cwd());
+const LOCAL = localSettings(process.env.CLAUDE_PROJECT_DIR || process.cwd());
+const ingest = LOCAL.ingest;
+const AUTH = LOCAL.auth;
+if (!ingest) process.exit(0);
 if (!AUTH) {
   log('no credential — leaving spool untouched; copy hooks/agent-knowledge.env.sample to .claude/agent-knowledge.env');
   process.exit(0);

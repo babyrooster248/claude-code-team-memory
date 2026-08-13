@@ -161,9 +161,10 @@ spool_it() {
   log "spooled $id ($1)"
 }
 
+# Resolved below, alongside the credential: both may live in .claude/agent-knowledge.env, so a public
+# repository can commit the project id and nothing else. The address of a write endpoint on somebody's
+# small VM does not belong in a public git history.
 ingest="${AGENT_KNOWLEDGE_INGEST:-}"
-[ -n "$ingest" ] || { spool_it "AGENT_KNOWLEDGE_INGEST unset"; exit 0; }
-ingest="${ingest%/}"
 
 # The credential, read from `.claude/agent-knowledge.env` walking up from the session directory —
 # same walk as the settings lookup, so opening Claude in a subdirectory still finds it. Never
@@ -178,13 +179,20 @@ while [ "$i" -lt 24 ]; do
   if [ -f "$f" ]; then
     [ -n "$ak_user" ] || ak_user="$(sed -n 's/^[[:space:]]*AGENT_KNOWLEDGE_USER[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$f" | tr -d '\r' | head -1)"
     [ -n "$ak_token" ] || ak_token="$(sed -n 's/^[[:space:]]*AGENT_KNOWLEDGE_TOKEN[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$f" | tr -d '\r' | head -1)"
+    [ -n "$ingest" ] || ingest="$(sed -n 's/^[[:space:]]*AGENT_KNOWLEDGE_INGEST[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$f" | tr -d '\r' | head -1)"
   fi
-  [ -n "$ak_user" ] && [ -n "$ak_token" ] && break
+  [ -n "$ak_user" ] && [ -n "$ak_token" ] && [ -n "$ingest" ] && break
   up="$(dirname "$d")"
   [ "$up" = "$d" ] && break
   d="$up"
   i=$((i + 1))
 done
+
+if [ -z "$ingest" ]; then
+  spool_it "no endpoint — set AGENT_KNOWLEDGE_INGEST in .claude/settings.json or .claude/agent-knowledge.env"
+  exit 0
+fi
+ingest="${ingest%/}"
 
 if [ -z "$ak_user" ] || [ -z "$ak_token" ]; then
   spool_it "no credential — copy hooks/agent-knowledge.env.sample to .claude/agent-knowledge.env"

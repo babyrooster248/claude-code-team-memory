@@ -223,8 +223,17 @@ console.log('updated record ' + id);
       : 'Node data tooling for the catalog service. Plain node, no build step.';
     w('CLAUDE.md', `# ${projectId}\n\n${summary}\n\n@AGENTS.md\n\n${MEMORY_INSTRUCTION}`);
 
-    const settings = { autoMemoryDirectory: settingsPath() };
-    if (ingest) settings.env = { AGENT_KNOWLEDGE_INGEST: ingest, AGENT_KNOWLEDGE_PROJECT: projectId };
+    // The project id is committed: it is not a secret, and it is what lets one host serve several
+    // teams. The endpoint URL is only committed when one is passed — for a public repository, leave
+    // it out and let each member's `.claude/agent-knowledge.env` carry it next to their credential.
+    // The address of a write endpoint on a small VM does not belong in a public git history.
+    const settings = {
+      autoMemoryDirectory: settingsPath(),
+      env: Object.assign(
+        { AGENT_KNOWLEDGE_PROJECT: projectId },
+        ingest ? { AGENT_KNOWLEDGE_INGEST: ingest } : {}
+      ),
+    };
     if (hooks) {
       settings.hooks = {
         PostToolUse: [{

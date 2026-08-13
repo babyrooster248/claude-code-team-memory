@@ -139,22 +139,32 @@ function headerLines(note) {
 // into the spool. A spooled note is a file sitting on disk possibly for days; putting the token in
 // its replayable header block would turn every unsent note into a second copy of the credential.
 // The flushers read this the same way at send time.
-function credential(startDir) {
+// Reads the member's local settings: the credential, and optionally the endpoint.
+//
+// The endpoint normally lives in the project's committed `.claude/settings.json`, where it is not a
+// secret and saves every member a step. That stops being free when the repository is public: the
+// address of a write endpoint on somebody's small VM does not belong in a public git history. So it
+// can live here instead, in the file each member already copies once, and the committed settings can
+// carry nothing but the project id. Environment wins, then this file — so a team with a private repo
+// keeps the simpler arrangement and changes nothing.
+function localSettings(startDir) {
   let user = process.env.AGENT_KNOWLEDGE_USER || '';
   let token = process.env.AGENT_KNOWLEDGE_TOKEN || '';
+  let ingest = process.env.AGENT_KNOWLEDGE_INGEST || '';
 
   // Walks up for the same reason the settings lookup does: a member who opens Claude in a
   // subdirectory would otherwise have no credential and no idea why, which is the silent-failure
   // shape this project keeps re-learning.
   let dir = path.resolve(startDir);
-  for (let i = 0; i < 24 && (!user || !token); i++) {
+  for (let i = 0; i < 24 && (!user || !token || !ingest); i++) {
     const f = path.join(dir, '.claude', 'agent-knowledge.env');
     try {
       for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
-        const m = /^\s*(AGENT_KNOWLEDGE_USER|AGENT_KNOWLEDGE_TOKEN)\s*=\s*(.*?)\s*$/.exec(line);
+        const m = /^\s*(AGENT_KNOWLEDGE_USER|AGENT_KNOWLEDGE_TOKEN|AGENT_KNOWLEDGE_INGEST)\s*=\s*(.*?)\s*$/.exec(line);
         if (!m || !m[2]) continue;
         if (m[1].endsWith('USER')) user = user || m[2];
-        else token = token || m[2];
+        else if (m[1].endsWith('TOKEN')) token = token || m[2];
+        else ingest = ingest || m[2];
       }
     } catch { /* absent: keep walking */ }
     const up = path.dirname(dir);
@@ -162,8 +172,12 @@ function credential(startDir) {
     dir = up;
   }
 
-  if (!user || !token) return null;
-  return 'Basic ' + Buffer.from(`${user}:${token}`, 'utf8').toString('base64');
+  return {
+    ingest,
+    auth: (user && token)
+      ? 'Basic ' + Buffer.from(`${user}:${token}`, 'utf8').toString('base64')
+      : null,
+  };
 }
 
 function post(url, note, onFail, auth) {
@@ -230,7 +244,8 @@ const file = foldDrive(payload?.tool_input?.file_path);
 // The common case by far is an ordinary source edit, so this stays a prefix comparison
 // with no I/O. It is deliberately the one silent exit in this script: logging every
 // source edit would bury the lines that matter.
-const ingest = process.env.AGENT_KNOWLEDGE_INGEST;
+// Resolved together with the credential, because both can live in the same local file — see
+// localSettings(). Read after `cwd` is known, so the walk starts where the session was opened.
 
 // Anchor on the project root, not on where the session happened to start. Claude Code
 // supplies CLAUDE_PROJECT_DIR; `payload.cwd` is whichever directory the member opened,
@@ -320,14 +335,18 @@ const note = {
   project: process.env.AGENT_KNOWLEDGE_PROJECT || '',
 };
 
-if (!ingest) { spool(note, 'AGENT_KNOWLEDGE_INGEST unset'); done(); }
+const local = localSettings(cwd);
+if (!local.ingest) {
+  spool(note, 'no endpoint — set AGENT_KNOWLEDGE_INGEST in .claude/settings.json or in .claude/agent-knowledge.env');
+  done();
+}
 
 // A member who has not copied the env file yet is not an error to swallow: their notes spool and
 // the log says exactly which file to create, so the knowledge waits instead of evaporating.
-const auth = credential(cwd);
+const auth = local.auth;
 if (!auth) {
   spool(note, 'no credential — copy hooks/agent-knowledge.env.sample to .claude/agent-knowledge.env');
   done();
 }
 
-post(ingest.replace(/\/$/, '') + '/note', note, why => { spool(note, why); done(); }, auth);
+post(local.ingest.replace(/\/$/, '') + '/note', note, why => { spool(note, why); done(); }, auth);
