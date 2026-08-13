@@ -402,6 +402,11 @@ function runAggregate(projectId, project, paths) {
   // Without this the commit lives only in the host's clone and no teammate ever sees it — including
   // an auto-applied confidence change, which would "apply itself" into a directory nobody reads.
   if (cfg.push) args.push('--push');
+  // Opening the request too, when the team has supplied a command that can. Pushing a branch needs a
+  // key scoped to one repo; opening a request needs a forge API, so it stays a command the team owns
+  // rather than an integration this project ships. Absent, the run prints the compare URL and a human
+  // clicks it.
+  if (cfg.prCommand) args.push('--pr-command', cfg.prCommand);
 
   aggLog(projectId, `running: node ${args.slice(1).join(' ')}`);
   const started = Date.now();

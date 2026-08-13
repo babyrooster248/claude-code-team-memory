@@ -16,6 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
+const { pickBranch, publish, DEFAULT_BRANCH } = require('./branch');
 
 // Declared up here rather than beside the parser because the deletion check runs earlier in the
 // file and `const` is not hoisted — putting these next to their users cost one TDZ crash.
@@ -37,6 +38,12 @@ const cap = parseInt(opt('cap', '50'), 10);
 // risked discarding the note it was called to distil.
 const model = opt('model', 'opus');
 const votes = parseInt(opt('votes', '3'), 10);
+// Optional, and deliberately a command rather than an integration. Opening a pull request needs a
+// forge API and a token scoped far wider than the deploy key that pushes the branch, and this project
+// works on any git host precisely because it never calls one. A team that wants the request opened
+// automatically supplies the command that does it — `gh pr create --fill --base main` — with their own
+// credential. BRANCH is substituted. Nothing here learns what a forge is.
+const prCommand = opt('pr-command', null);
 
 if (!store || !artifact) {
   console.error('usage: node aggregate.js --store <memory-dir> --artifact <file> [--events e.jsonl]');
@@ -400,16 +407,15 @@ if (has('commit') && file.trim() === current.trim()) {
   // Branch first, then write. Creating the file after the branch switch removes the stash dance
   // the previous version needed, and with it a step that could fail halfway.
   //
-  // `-B` rather than reusing wherever the branch already points. The previous version checked the name
-  // out if it existed, and a branch left over from an earlier day — or from before the artifact repo's
-  // history was rewritten — is not based on the current main. The observed result was a pull request
-  // whose diff added back an entire previous version of the project and deleted the current one. That
-  // reads as a catastrophe and is really just a stale base.
-  //
-  // Resetting it costs nothing: every run writes the WHOLE artifact, so an earlier proposal on that
-  // branch carries no content this commit lacks.
-  const branch = 'agent-knowledge/' + new Date().toISOString().slice(0, 10);
-  if (!gate.auto) git(['checkout', '-B', branch]);
+  // One branch, one open pull request, for the life of the repository — see branch.js for why, and
+  // for the two wrong pull requests that taught it. An auto-applied confidence change stays on the
+  // current branch: it carries no decision, so there is nothing to open a request about.
+  const branch = DEFAULT_BRANCH;
+  if (!gate.auto) {
+    const r = pickBranch({ git, branch });
+    if (r.action === 'continue') console.log(`continuing the open proposal on ${branch}`);
+    if (r.action === 'rebuild') console.log(`rebuilt ${branch} — it had fallen behind the base`);
+  }
 
   fs.copyFileSync(proposal, artifact);
   fs.writeFileSync(msgFile, subject + (body && body !== subject.slice(24) ? '\n\n' + body : '') + '\n');
@@ -434,19 +440,17 @@ if (has('commit') && file.trim() === current.trim()) {
   // no teammate at all — the auto-apply path in particular would "apply itself" into a directory
   // nobody ever reads. Opt-in, because the manual path should not suddenly start pushing.
   if (has('push')) {
-    const cur = git(['rev-parse', '--abbrev-ref', 'HEAD']).stdout.trim();
-    // --force-with-lease because the branch is reset to the current base on every run, so its remote
-    // copy legitimately diverges. Lease rather than plain force: if someone else pushed to that branch
-    // in the meantime, the push fails loudly instead of overwriting them.
-    const p = git(['push', '--force-with-lease', '--set-upstream', 'origin', cur], { probe: true });
-    if (p.status === 0) {
-      console.log(`pushed ${cur} to origin`);
-    } else {
+    const out = publish({
+      git, prCommand, cwd: repo,
+      run: (cmd, cwd) => spawnSync(cmd, { cwd, shell: true, encoding: 'utf8' }),
+    });
+    out.log.forEach(l => console.log(l));
+    if (out.state === 'push-failed') {
       // Loud, and not fatal: the commit is real and local, so the work is not lost — but silence here
       // would mean a pull request that never appears and no clue why.
-      console.error(`\nPUSH FAILED — ${sha} is committed on ${cur} in ${repo} but did not reach origin.\n` +
-        `  ${(p.stderr || p.stdout || '').trim().split('\n').slice(-2).join(' ')}\n` +
-        `  Nothing is lost. Fix the remote or the credential and push ${cur} by hand.`);
+      console.error(`\nPUSH FAILED — ${sha} is committed on ${out.branch} in ${repo} but did not reach origin.\n` +
+        `  ${out.error}\n` +
+        `  Nothing is lost. Fix the remote or the credential and push ${out.branch} by hand.`);
     }
   }
 }
