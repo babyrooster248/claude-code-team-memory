@@ -14,7 +14,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const { pickBranch, publish, DEFAULT_BRANCH } = require('./branch');
+const { pickBranch, publish, resolveBase, restoreBase, DEFAULT_BRANCH } = require('./branch');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'branch-test-'));
 
@@ -178,6 +178,62 @@ const commit = (g, text, msg) => {
     out.log.some(l => /branch IS pushed/.test(l)), true);
   check('log warns nothing will retry',
     out.log.some(l => /will not try again/.test(l)), true);
+}
+
+// --- 7b. the clone is left on the proposal branch --------------------------------------------
+//
+// Observed on the real host: a run finishes, and the clone stays checked out on `agent-knowledge`.
+// The trigger's `git pull --ff-only` then pulls the PROPOSAL, so the run after a reviewer merges
+// never learns that main moved — and re-proposes the line the reviewer deleted. That is the exact
+// failure the pull was added to prevent, arriving through the back door.
+{
+  const r = repo('left-on-branch');
+  const run = () => ({ status: 0 });
+
+  // Run one: propose, push, and (as the old code did) leave the clone on the branch.
+  pickBranch({ git: r.g });
+  commit({ work: r.work, g: r.g }, '# base\n- keep me\n- delete me\n', 'chore(agent-knowledge): two');
+  publish({ git: r.g, prCommand: null, run });
+  check('a run really does leave HEAD on the proposal',
+    r.g(['rev-parse', '--abbrev-ref', 'HEAD']).stdout.trim(), DEFAULT_BRANCH);
+
+  // The reviewer deletes a line and merges. main now has one entry; the branch still has two.
+  r.g(['checkout', '-q', 'main']);
+  commit({ work: r.work, g: r.g }, '# base\n- keep me\n', 'reviewer merged, minus one line');
+  r.g(['push', '-q', 'origin', 'main']);
+  r.g(['checkout', '-q', DEFAULT_BRANCH]);   // back to where the previous run left it
+
+  // Run two. Nothing tells it what the base is, which is the whole point.
+  const out = pickBranch({ git: r.g });
+  check('base is resolved as main, not as the branch itself', out.base, 'main');
+  check('so the stale proposal is rebuilt', out.action, 'rebuild');
+  const text = fs.readFileSync(path.join(r.work, 'AGENTS.md'), 'utf8');
+  check('the deleted line is GONE from what the next run reads', /delete me/.test(text), false);
+  check('and what the reviewer kept is still there', /keep me/.test(text), true);
+
+  // And the fix for the cause, not just the symptom.
+  restoreBase({ git: r.g, base: out.base });
+  check('after restoreBase the clone rests on the base',
+    r.g(['rev-parse', '--abbrev-ref', 'HEAD']).stdout.trim(), 'main');
+}
+
+// --- 7c. a repository that does not call it main ----------------------------------------------
+//
+// Guessing "main" would be wrong on every repository that says master, and wrong silently.
+{
+  const remote = path.join(tmp, 'trunk-remote.git');
+  const work = path.join(tmp, 'trunk');
+  spawnSync('git', ['init', '-q', '--bare', '-b', 'trunk', remote], { encoding: 'utf8' });
+  spawnSync('git', ['clone', '-q', remote, work], { encoding: 'utf8' });
+  const g = (a, o = {}) => spawnSync('git', ['-C', work, ...a], { encoding: 'utf8', ...o });
+  g(['config', 'user.name', 'test']); g(['config', 'user.email', 't@example.com']);
+  fs.writeFileSync(path.join(work, 'AGENTS.md'), '# base\n');
+  g(['add', '-A']); g(['commit', '-q', '-m', 'base']); g(['push', '-q', '-u', 'origin', 'trunk']);
+
+  check('base is whatever the repo actually calls it', resolveBase({ git: g }), 'trunk');
+  pickBranch({ git: g });
+  g(['commit', '-q', '--allow-empty', '-m', 'proposal']);
+  check('and still resolves once HEAD is the proposal branch', resolveBase({ git: g }), 'trunk');
 }
 
 // --- 8. the auto-applied path pushes, and opens nothing ---------------------------------------

@@ -1277,6 +1277,55 @@ Three things this cost that are worth naming:
   through create / continue / rebuild / rewritten-history against real repositories without spending
   a model call.
 
+## 19. The whole loop ran itself, and the run after it would have undone the review
+
+The first end-to-end pass where nobody typed anything, on the host, over the internet:
+
+```
+03:23:03  accepted csv-for-finance-uses-semicolon.md   (twice — both hooks)
+03:23:10  REFUSED (MEMORY.md is a personal index, not a note)
+03:24:34  90 quiet seconds elapsed, aggregate started
+03:25:03  2/2 survived intake
+03:26:15  gate: NEEDS A PERSON (entry k5 was added)
+03:26:16  committed 4271663 on agent-knowledge
+03:26:20  pushed, prCommand ok — pull request open
+03:26:20  finished in 106s, exit 0
+```
+
+The diff a reviewer sees is one file, four insertions, two deletions: an existing entry promoted from
+two contributors to three, and one new entry. 106 seconds on 958 MB of RAM, of which the merge pass
+alone is about 70.
+
+Two things worth keeping from around it.
+
+**I called it dead while it was still working.** Intake finished at 03:25:03 and I checked twice
+before 03:26:15, saw no new line, and concluded the run had died at the merge — the user then logged
+a fresh account into the host on the strength of that. The merge pass is a single model call that
+emits nothing until it returns, so *silence in the log is indistinguishable from a hang*, and I read
+the ambiguity as the worse case without checking whether the process was alive. `ps` would have
+settled it in one command. For the demo the practical form is: the run takes ~106s and says nothing
+for 70 of them, so do not narrate it as stuck.
+
+**Re-running it by hand was the accident that found the real bug.** The second run correctly found
+nothing to change and committed nothing — but it revealed that a finished run leaves the clone
+checked out on the proposal branch. The trigger does `git pull --ff-only` before every run, and a
+pull is against whatever is checked out. So:
+
+1. Reviewer deletes a line in the pull request and merges. `main` no longer has it.
+2. The host clone is still on `agent-knowledge`, which still does.
+3. Next run pulls the *proposal*, sees no movement, reads the artifact from the branch — and proposes
+   the deleted line again.
+
+That is precisely the failure `git pull --ff-only` was added to prevent, arriving through the back
+door, and it would have broken the demo beat that shows a rejection sticking. The base is now
+resolved explicitly — `origin/HEAD`, falling back to any branch that is not the proposal, because
+guessing `main` is wrong on every repository that says `master` — and the clone is returned to it
+after the push. Both are covered by tests that reproduce the reviewer-deletes-and-merges sequence.
+
+The pattern across §18 and this one is the same: **the parts that fail silently are the parts where
+git state persists between runs**, and a passing suite says nothing about them because they never had
+a test at all.
+
 ## Designs that failed
 
 **Mining the transcript for moments something went wrong.** Parse the session transcript at `SessionEnd`,

@@ -16,7 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
-const { pickBranch, publish, DEFAULT_BRANCH } = require('./branch');
+const { pickBranch, publish, restoreBase, DEFAULT_BRANCH } = require('./branch');
 
 // Declared up here rather than beside the parser because the deletion check runs earlier in the
 // file and `const` is not hoisted — putting these next to their users cost one TDZ crash.
@@ -411,10 +411,12 @@ if (has('commit') && file.trim() === current.trim()) {
   // for the two wrong pull requests that taught it. An auto-applied confidence change stays on the
   // current branch: it carries no decision, so there is nothing to open a request about.
   const branch = DEFAULT_BRANCH;
+  let base = null;
   if (!gate.auto) {
     const r = pickBranch({ git, branch });
+    base = r.base;
     if (r.action === 'continue') console.log(`continuing the open proposal on ${branch}`);
-    if (r.action === 'rebuild') console.log(`rebuilt ${branch} — it had fallen behind the base`);
+    if (r.action === 'rebuild') console.log(`rebuilt ${branch} — it had fallen behind ${base}`);
   }
 
   fs.copyFileSync(proposal, artifact);
@@ -456,6 +458,20 @@ if (has('commit') && file.trim() === current.trim()) {
       console.error(`\nPUSH FAILED — ${sha} is committed on ${out.branch} in ${repo} but did not reach origin.\n` +
         `  ${out.error}\n` +
         `  Nothing is lost. Fix the remote or the credential and push ${out.branch} by hand.`);
+    }
+  }
+
+  // Last, and only after the proposal is safely on origin: put the clone back where the next run has
+  // to find it. Leaving it on the proposal branch makes the trigger's `git pull --ff-only` pull the
+  // proposal instead of the base, so the run after a reviewer merges never learns that main moved —
+  // and re-proposes the line they deleted. That is the failure the pull exists to prevent, arriving
+  // through the back door.
+  if (base) {
+    const err = restoreBase({ git, base });
+    if (err) {
+      console.error(`\n${err}\n` +
+        `  The proposal is safe. But the next run starts on ${branch} and would propose against its\n` +
+        `  own last output rather than against ${base}. Check the clone out on ${base} by hand.`);
     }
   }
 }

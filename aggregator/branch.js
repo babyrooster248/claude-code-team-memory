@@ -18,8 +18,39 @@
 
 const DEFAULT_BRANCH = 'agent-knowledge';
 
-function pickBranch({ git, branch = DEFAULT_BRANCH, base = 'HEAD' }) {
+// Which branch a proposal is measured AGAINST — and the reason this is a function rather than the
+// word "HEAD".
+//
+// A run leaves the clone checked out on the proposal branch. Taking HEAD as the base then means the
+// next run proposes against the previous proposal instead of against main, and the consequence is
+// exactly the one the whole pull-before-running design exists to prevent: a reviewer deletes a line
+// in the pull request and merges, main now lacks it, but the host clone is still sitting on the
+// branch that has it — so the next run reads the line from there and proposes it again. The reviewer
+// sees a machine re-asking a question they already answered, which is how a pipeline gets muted.
+//
+// So: the base is the branch the proposal targets, never whatever HEAD happens to be. Asked of
+// origin, because that is what a pull request is opened against.
+function resolveBase({ git, branch = DEFAULT_BRANCH }) {
+  const head = git(['rev-parse', '--abbrev-ref', 'HEAD'], { probe: true }).stdout.trim();
+  if (head && head !== branch && head !== 'HEAD') return head;
+
+  // HEAD is the proposal branch — a previous run left it there, or crashed there. Ask origin what it
+  // considers default.
+  const sym = git(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { probe: true });
+  if (sym.status === 0) {
+    const b = sym.stdout.trim().replace(/^origin\//, '');
+    if (b && b !== branch) return b;
+  }
+  // A clone with no origin, or one that never fetched a default. Take the first ordinary branch that
+  // is not the proposal; guessing "main" would be wrong on every repository that says master.
+  const all = git(['for-each-ref', '--format=%(refname:short)', 'refs/heads/'], { probe: true })
+    .stdout.split('\n').map(s => s.trim()).filter(s => s && s !== branch);
+  return all[0] || 'main';
+}
+
+function pickBranch({ git, branch = DEFAULT_BRANCH, base = null }) {
   git(['fetch', '--quiet', 'origin'], { probe: true });
+  base = base || resolveBase({ git, branch });
 
   const baseSha = git(['rev-parse', base]).stdout.trim();
   const exists = git(['rev-parse', '--verify', '--quiet', branch], { probe: true }).status === 0;
@@ -28,11 +59,11 @@ function pickBranch({ git, branch = DEFAULT_BRANCH, base = 'HEAD' }) {
 
   if (onTopOfBase) {
     git(['checkout', branch]);
-    return { branch, action: 'continue' };
+    return { branch, base, action: 'continue' };
   }
 
-  git(['checkout', '-B', branch]);
-  return { branch, action: exists ? 'rebuild' : 'create' };
+  git(['checkout', '-B', branch, base]);
+  return { branch, base, action: exists ? 'rebuild' : 'create' };
 }
 
 // Getting the commit off the host and, if the team asked for it, opening the request.
@@ -93,4 +124,16 @@ function publish({ git, prCommand = null, run = null, cwd = null }) {
   return { state: 'pr-command-failed', branch, url, log };
 }
 
-module.exports = { pickBranch, publish, DEFAULT_BRANCH };
+// Leave the clone where the next run needs to find it: on the base, not on the proposal.
+//
+// This is not tidiness. The trigger runs `git pull --ff-only` before every run, and a pull is against
+// whatever is checked out — so a clone resting on the proposal branch pulls the proposal, never sees
+// that main moved, and proposes against its own last output. Called after the push, and the failure
+// is loud rather than fatal, because the proposal is already safely on origin by then.
+function restoreBase({ git, base }) {
+  const r = git(['checkout', base], { probe: true });
+  return r.status === 0 ? null
+    : `could not return the clone to ${base}: ${(r.stderr || r.stdout || '').trim().split('\n')[0]}`;
+}
+
+module.exports = { pickBranch, publish, resolveBase, restoreBase, DEFAULT_BRANCH };
