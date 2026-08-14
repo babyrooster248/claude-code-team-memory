@@ -178,6 +178,14 @@ You must maintain it:
   as a second person would turn the promotion rule into "seen twice", which is
   exactly what it exists to prevent.
 - Ids are opaque. Do not try to read meaning into them.
+- **An id belongs to its fact permanently.** If `[k6]` names the id-uniqueness entry when you
+  receive the file, it still names that entry when you hand it back — wherever it ends up in the
+  file, however you sharpen its wording. A new entry takes the next number that has never been
+  used, never a number freed up by moving something else. This is not bookkeeping: the state block
+  keys contributor sets by id, so an id handed to a different sentence hands it that sentence's
+  history, and a fact nobody has confirmed can end up marked `(3 people)`. That claim — verified by
+  people who verified something else — is the single thing this file must never make. A real run
+  did exactly this, moving `[k6]` onto a new entry and renaming the old one `[k7]`.
 
 ## What the file may contain, and nothing else
 

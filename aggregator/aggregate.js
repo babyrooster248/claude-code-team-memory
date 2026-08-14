@@ -17,6 +17,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const { pickBranch, publish, restoreBase, DEFAULT_BRANCH } = require('./branch');
+const { findReassigned } = require('./tags');
 
 // Declared up here rather than beside the parser because the deletion check runs earlier in the
 // file and `const` is not hoisted — putting these next to their users cost one TDZ crash.
@@ -370,6 +371,26 @@ function classify(before, after) {
 
 const gate = classify(current, file);
 console.log(`\n--- gate: ${gate.auto ? 'AUTO-APPLY' : 'NEEDS A PERSON'} (${gate.why}) ---`);
+
+// A tag names one fact for the life of the repository, because the state block keys contributor sets
+// by tag — it is the only thing tying "three people hit this" to *which thing they hit*. A merge that
+// hands `[k6]` to a different sentence therefore hands it that sentence's history, and a new,
+// unverified fact can inherit `(3 people)`.
+//
+// This reports rather than aborts. The gate above already refuses to auto-apply a change like this,
+// so a person is looking at it either way; what they lack is any hint that the diff in front of them
+// is a renaming rather than an edit. Aborting would also throw away a merge that is usually right in
+// every other respect, and leave nothing to review at all.
+const moved = findReassigned(current, file);
+if (moved.length) {
+  console.error(`\n[aggregate] WARNING: ${moved.length} entry id(s) changed which fact they name:`);
+  for (const m of moved) {
+    console.error(`  ${m.from} -> ${m.to}  (the sentence that was ${m.from} now carries ${m.to}, ` +
+                  `match ${m.similarity})`);
+  }
+  console.error(`  Ids are permanent labels, not positions. Check the contributor counts in the ` +
+                `state block\n  before merging: a reused id gives a new fact the history of an old one.`);
+}
 
 const proposal = artifact + '.proposed';
 fs.writeFileSync(proposal, file.endsWith('\n') ? file : file + '\n');
