@@ -1348,6 +1348,63 @@ Three bugs in one afternoon, in the same twenty lines, each found by doing the n
 run it, re-run it, merge it. None of them would have been found by reading the code, and all three
 were invisible in the logs, which said success every time.
 
+## 20. Rehearsal on real infrastructure found four more, in one afternoon
+
+Continuing straight from §18 and §19, still on the same host, still the same afternoon.
+
+**A tag can be handed to a different fact, and the count follows it.** A run's merge left `[k6]`
+naming a brand-new entry and renamed the id-uniqueness fact it used to name to `[k7]`. Nothing
+detected it — the gate's own comparison is keyed by tag, so from its point of view a fact simply
+"changed text" under `[k6]`, which is an ordinary edit needing review, not a red flag. It cost nothing
+this time because both entries happened to have one contributor each. Reuse a tag that carried three
+confirmations and the new, unverified fact under it inherits `(3 people)` — the single claim this
+design exists to prevent, arriving through the one mechanism meant to prevent it. `aggregator/tags.js`
+now diffs the file by *sentence* rather than by tag, and flags a tag whose sentence moved elsewhere;
+detection, not prevention, because the gate already stops the auto-apply path and a person is looking
+either way — they were just missing the one word that would tell them what they were looking at.
+Tuning the detector against the real transcript mattered as much as writing it: the first threshold
+(0.5) missed the actual case, which scored 0.52 by rewording hard on the way. A floor that a real
+positive clears by a hundredth of a point is not a check.
+
+**Re-running a merged branch by hand, in idle curiosity, found the bug in §19 before a demo would
+have.** The run that produced PR #2 finished, and I asked whether re-running it changed anything — it
+did not, correctly — and that idle re-run is what exposed the clone sitting on the proposal branch
+instead of the base. Nobody would have hit this by watching the happy path; it took doing the
+unnecessary thing once.
+
+**A merged pull request does not vacate its branch.** GitHub keeps the head branch after merging
+unless told to delete it, so the very fix for §19's "does origin have the branch" question broke
+again the moment a reviewer actually merged: origin still had it, and the rule answered "a request is
+still open" for one that had just closed. `publish()` now asks git whether the branch is *contained
+in* the base rather than merely present — merged means contained, open means ahead — which is also
+the piece that let the third real run open PR #4 as a **fresh** request rather than silently declining
+one nobody would ever see.
+
+**I read an in-progress run as a dead one, twice, in the same afternoon.** The merge pass is a single
+model call and prints nothing until it returns; at 958MB/2vCPU that is 70–200+ of a 100–280 second
+run. Both times I checked stderr, saw no new line, and said "it died" instead of running `ps`. The
+second time cost nothing; the first time it cost the user logging a fresh Claude account into the VM
+on the strength of a wrong diagnosis. `ps -fa aggregate.js` answers the question in one command and I
+now default to it before calling anything stuck.
+
+**Applying a documented convention correctly produces no note, and that is correct, not a bug to
+route around.** Told to add a categories export with no other guidance, member 2's agent read k5,
+applied delimiter, culture, BOM, and quoting exactly, and wrote nothing to memory — because it learned
+nothing. The capture rule fires on discovery, and there was none. This is the same fact as the
+cost-savings finding (§11) from the identity side rather than the ledger side: the more effective the
+artifact, the fewer discoveries the next agent has, and act 5 of the demo needs exactly one. The
+runbook now carries a second prompt for this reason, not as a fallback but as the expected shape —
+correcting something the agent just did that was reasonable and wrong for this specific project, which
+is the one situation guaranteed to produce something worth writing down.
+
+**One Claude account behind two credentials is one person who can promote an entry alone, and the
+system says so rather than stopping it.** Rehearsal re-tripped the guard from §16: laptop and the VM
+member-2 clone were signed into the same account. The warning fired and nothing else happened, which
+is the correct behavior — refusing outright would mean guessing at organizational facts (a lead
+covering two roles is legitimate) the endpoint has no way to know. But it means any `(2 people)`
+reached under these exact rehearsal conditions is not a number the artifact can stand behind, and the
+runbook now says so before the room can ask.
+
 ## Designs that failed
 
 **Mining the transcript for moments something went wrong.** Parse the session transcript at `SessionEnd`,

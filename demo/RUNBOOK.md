@@ -16,7 +16,9 @@ comes out monolingual English, because the file is read by everyone who will eve
 | Host | `systemctl --user status agent-knowledge-ingest` → active. From your laptop: `curl -s https://<host>/health` → `{"ok":true}` |
 | Journal | `journalctl --user -u agent-knowledge-ingest -f` open in a second terminal, large font, left running all session |
 | Second member on ONE machine | Only if you cannot get a real second machine, and then: give that clone a different `autoMemoryDirectory`. Both clones inherit the same committed value, which is correct across machines and collides on one — the second agent otherwise writes into, and reads, the first member's memory. Check `~/.agent-knowledge-spool` is empty first: it is shared per machine, so a queued note is flushed with whichever credential runs next. Expect the "one Claude account, two credentials" warning unless you also switch Claude accounts |
-| Colleague | Their clone exists, `.claude/agent-knowledge.env` filled in, and **they have opened Claude Code in that directory once and accepted the trust dialog**. Skip this and act 5 dies: an untrusted workspace ignores `permissions.allow`, every Bash call is denied, and the agent cannot run `node` at all |
+| Colleague | A **fresh clone**, `.claude/agent-knowledge.env` filled in with *their* credential, a git identity of their own, and **Claude Code opened in that directory once with the trust dialog accepted**. Skip the trust dialog and act 5 dies quietly: hooks declared in a project's settings do not run in an untrusted workspace, so the agent works, writes nothing to the host, and nothing anywhere says why |
+| A different Claude account | **Not the one running on the host.** Identity comes from the credential, but the endpoint also watches the Claude account behind it, and one account presenting two credentials is one person who could promote an entry alone. It warns and does not refuse — so a `(2 people)` reached that way is a number the file cannot stand behind. Rehearsal tripped this: laptop and VM were signed into the same account |
+| Inbox drained | **Empty it, or act 3 overruns.** Every run re-filters every note in the inbox, three votes each, so the run time grows with the queue: 106s for 2 notes, 155s for 5, **281s for 6** — measured on this host. Act 3 assumes the run finished during act 2's two minutes, which holds for one fresh note and nothing else |
 | Node | `node --version` on both machines. The sample project is plain node with no dependencies, so there is nothing to install and nothing to fail in the room |
 | Fresh state | `node demo/setup-project.js --dest <path> --stack node --seeded --ingest https://<host> --project catalog-svc`. **With** `--seeded`, so `AGENTS.md` starts with four reviewed entries: an empty file would make act 4 (a reviewer deleting a line) and act 5 (promoting one to `(2 people)`) have nothing to act on. What the room watches is the *diff* against those four, which is also what a real team's second week looks like. See findings §17 for everything a reset has to include, the repo's own git history included |
 
@@ -137,17 +139,46 @@ correctly by a different person's agent, on a task nobody had done before.
 Do **not** show the cost table. `docs/findings.md` §11 has it for anyone who asks, and an audience
 does not pay attention to a table proving something they already believe.
 
-### 5b — the loop closes
+### 5b — the loop closes, and why it needs a second prompt
 
-Their note reaches the host and the trigger runs again. That run does three things at once:
+The task above will **not**, on its own, produce a note. Rehearsed and confirmed: the agent read the
+entry, applied it perfectly, and wrote nothing — because it learned nothing. Applying a documented
+convention is not a discovery, and discovery is what the capture rule waits for.
 
-- does **not** re-propose the line deleted in act 4, because it is in `rejected.md`
-- now has **two authenticated emails**, so the entry moves to `(2 people)`
-- and because only the marker changed, the gate says **AUTO-APPLY** — no pull request
+That is not a defect to work around on stage. It is the same fact as 5a seen from the other side, and
+worth saying out loud: **5a succeeds precisely when the artifact stops the agent discovering anything,
+and 5b needs a discovery.** One task cannot deliver both.
 
-**Unverified end to end**, and it is the biggest remaining gap in the whole demo: promotion to
-`(2 people)` has only ever been exercised by fixtures, because a second identity needs a second
-credential in real use. This act is the first time it will be attempted with two real ones.
+So 5b is a second prompt: correct something the agent just did that was reasonable and wrong for this
+project. In rehearsal, the categories export defaulted to live-only — matching `export.js`, and
+matching k1's advice — and the correction was that finance needs the inactive rows to reconcile last
+month's invoices:
+
+```
+Không đúng. Bản gửi tài chính phải có cả category đã ngừng bán. Họ đối soát các dòng của tháng
+trước, mà những dòng đó trỏ vào category cũ — thiếu là họ không khớp được rồi lại hỏi ngược lại
+mình. Chỉ bản cho storefront mới lọc active thôi. Sửa mặc định lại đi.
+```
+
+**Verified.** A note appeared, was accepted under the second credential, survived intake, and reached
+the open pull request as a new entry whose state line carries a **different contributor id** from
+every other line. That id is the thing to point at: it is derived from the authenticated credential,
+so it is the proof that this came from a second person on a second machine rather than from a header
+anyone could have typed.
+
+**On promotion to `(2 people)`, say the true thing rather than the hoped-for one.** It did not
+happen in rehearsal and it is rare by construction: promotion needs two people to hit the *same*
+thing independently, and the artifact exists to stop the second one hitting it. Counts therefore grow
+mostly from confirmations people volunteer, not from repeated accidents — so `(3 people)` does not
+mean three people were bitten. If you want to attempt it live, use a symptom rather than a task, so
+the agent has to look rather than read:
+
+```
+Tài chính bảo số trong report gửi lên không khớp với storefront. Tìm nguyên nhân đi.
+```
+
+This is the shape that produced the one real promotion so far (2→3 on k1). It is still a coin flip,
+so do not promise it before it lands.
 
 ## Act 6 — what it refuses, and what nobody knows (3')
 
