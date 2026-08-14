@@ -52,7 +52,12 @@ function similarity(a, b) {
 
 // Returns [{ from, to, similarity }] — the base's tag, the tag its sentence now wears, and how
 // confident that identification is. Empty when every tag still names its own fact.
-function findReassigned(before, after, { threshold = 0.5 } = {}) {
+// The threshold is a floor for "recognisably the same sentence", not the discriminator — that job
+// belongs to the comparison against whatever now wears the original tag, two lines down. Set low on
+// purpose: the real case scored 0.52, because the merge reworded the sentence heavily while moving
+// it, and a floor of 0.5 would have missed it by a hair and said nothing at all. A miss here is
+// silent; a false positive is a line of output a reviewer reads and dismisses.
+function findReassigned(before, after, { threshold = 0.3 } = {}) {
   const a = tagMap(before);
   const b = tagMap(after);
   const moved = [];

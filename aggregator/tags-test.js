@@ -29,6 +29,24 @@ const state = tags => `\n<!-- knowledge-state\n${tags.map(t => t + ': aaaa1111')
   check('the real case is caught', moved.map(m => `${m.from}->${m.to}`), ['k6->k7']);
 }
 
+// --- the same move, but reworded hard on the way ----------------------------------------------
+//
+// Verbatim from the run. The sentence was rewritten as it moved, scoring only 0.52 — which is why
+// the threshold sits well below what "obviously the same sentence" would suggest. A miss here is
+// silent, and silence is the failure mode this whole project keeps finding.
+{
+  const before = HEAD +
+    '- (unconfirmed, 1 person) Nothing checks item-id uniqueness — no schema, no id index in ' +
+    '`lib.js`, `report.js`, `export.js`, and `update.js` takes the first match. [k6]\n' + state(['k6']);
+  const after = HEAD +
+    '- (unconfirmed, 1 person) `data/catalog.json` is a shared external key space, not a repo ' +
+    'fixture — the warehouse and storefront reference item ids, so never renumber and never delete a row. [k6]\n' +
+    '- (unconfirmed, 1 person) Nothing checks that item `id`s in `data/catalog.json` are unique — ' +
+    'no schema and no id index, and a duplicate passes silently. [k7]\n' + state(['k6', 'k7']);
+  check('a heavily reworded move is still caught',
+    findReassigned(before, after).map(m => `${m.from}->${m.to}`), ['k6->k7']);
+}
+
 // --- sharpening in place, which the merge is supposed to do -----------------------------------
 {
   const before = HEAD + `- (2 people) Nothing filters active anywhere; report lists all six items. [k1]\n` + state(['k1']);
