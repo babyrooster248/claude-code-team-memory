@@ -1326,6 +1326,28 @@ The pattern across §18 and this one is the same: **the parts that fail silently
 git state persists between runs**, and a passing suite says nothing about them because they never had
 a test at all.
 
+**And then the reviewer merged, which broke it a third time.** The rule for whether to open a request
+was "does origin already have this branch?", asked before the push. Merging exposed the flaw in one
+step: forges keep the head branch unless told to delete it, so after the merge origin still had
+`agent-knowledge` — and the answer was yes for a request that was merged and closed. The next
+proposal would have been pushed to a branch nobody was looking at, with nothing anywhere saying so.
+The three-line version of the observation:
+
+| origin's copy of the branch | what it means | what to do |
+| --- | --- | --- |
+| absent | a new proposal | open a request |
+| present, contained in the base | its request was merged | open a request |
+| present, ahead of the base | its request is open | add a commit to that one |
+
+Git answers all three with `merge-base --is-ancestor`, and the third line is not an afterthought: it
+covers somebody pushing straight to the base while a request is open, where the branch is rebuilt and
+force-pushed and the existing request simply updates. "Does it exist" and "is it still open" look like
+the same question for exactly as long as nobody merges.
+
+Three bugs in one afternoon, in the same twenty lines, each found by doing the next ordinary thing —
+run it, re-run it, merge it. None of them would have been found by reading the code, and all three
+were invisible in the logs, which said success every time.
+
 ## Designs that failed
 
 **Mining the transcript for moments something went wrong.** Parse the session transcript at `SessionEnd`,

@@ -78,11 +78,36 @@ function pickBranch({ git, branch = DEFAULT_BRANCH, base = null }) {
 //
 // Returns lines to print and a `state` a caller — or a test — can assert on, rather than printing:
 // the decision is the thing worth checking, and it used to be buried in console.log.
-function publish({ git, prCommand = null, run = null, cwd = null }) {
+function publish({ git, base = null, prCommand = null, run = null, cwd = null }) {
   const log = [];
   const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']).stdout.trim();
-  const remoteHad = git(['ls-remote', '--exit-code', 'origin', 'refs/heads/' + branch],
-    { probe: true }).status === 0;
+  base = base || resolveBase({ git, branch });
+  git(['fetch', '--quiet', 'origin'], { probe: true });
+
+  // Is a request still open for this branch? The tempting question — "does origin already have the
+  // branch?" — gives the wrong answer the moment somebody merges: forges keep the head branch unless
+  // told to delete it, so origin still has it, and answering yes means declining to open a request
+  // for a proposal whose request is merged and closed. The proposal then sits on a pushed branch that
+  // nobody is looking at, and nothing anywhere says so.
+  //
+  // Git can tell the difference without being asked about requests at all: if origin's copy of the
+  // branch is already contained in the base, whatever request carried it has landed.
+  //
+  //   not on origin                      new proposal            open a request
+  //   on origin, contained in the base   its request was merged  open a request
+  //   on origin, ahead of the base       its request is open     add a commit to that one
+  //
+  // The third line covers the case where the base moved because somebody pushed to it directly: the
+  // branch gets rebuilt and force-pushed, and the request already open for it simply updates.
+  const remoteRef = 'refs/remotes/origin/' + branch;
+  const onRemote = git(['rev-parse', '--verify', '--quiet', remoteRef], { probe: true }).status === 0;
+  const baseRef = git(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/' + base],
+    { probe: true }).status === 0 ? 'refs/remotes/origin/' + base : base;
+  const landed = onRemote &&
+    git(['merge-base', '--is-ancestor', remoteRef, baseRef], { probe: true }).status === 0;
+  // Committing onto the base itself is the auto-applied path. There is nothing to review, so there is
+  // nothing to open.
+  const requestStillOpen = branch === base || (onRemote && !landed);
 
   // --force-with-lease because the branch is reset to the base whenever the base moved, so its remote
   // copy legitimately diverges. Lease rather than plain force: if somebody else pushed to that branch
@@ -103,9 +128,13 @@ function publish({ git, prCommand = null, run = null, cwd = null }) {
   if (url) log.push(`open a pull request:\n  ${url}`);
 
   if (!prCommand) return { state: 'pushed', branch, url, log };
-  if (remoteHad) {
-    log.push(`${branch} was already on origin — updated the open request rather than opening a second`);
+  if (requestStillOpen) {
+    log.push(`${branch} still has commits ${base} does not — added to the open request rather than ` +
+             `opening a second`);
     return { state: 'updated-existing', branch, url, log };
+  }
+  if (landed) {
+    log.push(`the previous proposal on ${branch} was merged into ${base} — opening a fresh request`);
   }
 
   const cmd = prCommand.replace(/\bBRANCH\b/g, branch);
@@ -116,8 +145,9 @@ function publish({ git, prCommand = null, run = null, cwd = null }) {
     log.push(`  prCommand ok${out ? '\n  ' + out : ''}`);
     return { state: 'opened', branch, url, log };
   }
-  // Loud, because this is the one path where nothing retries: origin has the branch now, so the next
-  // run will see remoteHad and correctly decline to open a request — for one that was never opened.
+  // Loud, because this is the one path where nothing retries: the branch is on origin with commits
+  // the base does not have, so the next run reads that as "a request is open for this" and correctly
+  // declines to open one — for a request that was never opened.
   log.push(`  prCommand FAILED (exit ${r.status}) — the branch IS pushed, but no request was opened,\n` +
            `  and later runs will not try again because the branch now exists on origin.\n` +
            `  Open it by hand${url ? `: ${url}` : ''}\n  ${out}`);

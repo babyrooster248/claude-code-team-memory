@@ -140,7 +140,67 @@ const commit = (g, text, msg) => {
   check('second push to the same branch → do NOT open another', second.state, 'updated-existing');
   check('the forge command ran exactly once, total', calls.length, 1);
   check('and the reason is in the log, not silent',
-    second.log.some(l => /already on origin/.test(l)), true);
+    second.log.some(l => /added to the open request/.test(l)), true);
+}
+
+// --- 5b. the request was merged, and the forge kept the branch --------------------------------
+//
+// Observed live. A reviewer merges the pull request; GitHub leaves the head branch on origin unless
+// told to delete it. "Does origin have the branch?" therefore answers yes for a request that is
+// merged and closed — and declining to open a new one leaves the next proposal on a pushed branch
+// nobody is looking at, with nothing anywhere saying so.
+{
+  const r = repo('merged-branch-kept');
+  const calls = [];
+  const run = (cmd) => { calls.push(cmd); return { status: 0, stdout: '', stderr: '' }; };
+
+  const first = pickBranch({ git: r.g });
+  commit({ work: r.work, g: r.g }, '# base\n- first proposal\n', 'chore(agent-knowledge): first');
+  check('first proposal opens a request',
+    publish({ git: r.g, base: first.base, prCommand: 'fake-gh', run }).state, 'opened');
+
+  // The reviewer merges, and the branch survives on origin — exactly what GitHub did.
+  r.g(['checkout', '-q', 'main']);
+  r.g(['merge', '-q', '--no-ff', '-m', 'Merge pull request #2', DEFAULT_BRANCH]);
+  r.g(['push', '-q', 'origin', 'main']);
+  restoreBase({ git: r.g, base: 'main' });
+  check('origin still has the merged branch',
+    r.g(['ls-remote', '--heads', 'origin', DEFAULT_BRANCH]).stdout.includes(DEFAULT_BRANCH), true);
+
+  // A new note arrives; the next run proposes again.
+  const next = pickBranch({ git: r.g });
+  check('the merged branch is rebuilt from the new base', next.action, 'rebuild');
+  commit({ work: r.work, g: r.g }, '# base\n- first proposal\n- second proposal\n',
+    'chore(agent-knowledge): second');
+  const out = publish({ git: r.g, base: next.base, prCommand: 'fake-gh', run });
+  check('merged request → open a FRESH one, not silence', out.state, 'opened');
+  check('the forge command ran a second time', calls.length, 2);
+  check('and the log says why', out.log.some(l => /was merged into main/.test(l)), true);
+}
+
+// --- 5c. somebody pushed straight to main while a request was open ----------------------------
+//
+// The branch is rebuilt, but its request is still open — force-pushing updates it, so opening
+// another would be the duplicate this whole rule exists to prevent.
+{
+  const r = repo('base-moved-request-open');
+  const calls = [];
+  const run = (cmd) => { calls.push(cmd); return { status: 0 }; };
+
+  const first = pickBranch({ git: r.g });
+  commit({ work: r.work, g: r.g }, '# base\n- proposal\n', 'chore(agent-knowledge): first');
+  publish({ git: r.g, base: first.base, prCommand: 'fake-gh', run });
+
+  r.g(['checkout', '-q', 'main']);
+  commit({ work: r.work, g: r.g }, '# base\n- hand edit\n', 'someone pushed to main');
+  r.g(['push', '-q', 'origin', 'main']);
+
+  const next = pickBranch({ git: r.g });
+  check('base moved → rebuild', next.action, 'rebuild');
+  commit({ work: r.work, g: r.g }, '# base\n- hand edit\n- proposal\n', 'chore(agent-knowledge): again');
+  const out = publish({ git: r.g, base: next.base, prCommand: 'fake-gh', run });
+  check('the open request is updated, not duplicated', out.state, 'updated-existing');
+  check('so the forge command still ran only once', calls.length, 1);
 }
 
 // --- 6. a rebuilt branch is still the same open request ---------------------------------------

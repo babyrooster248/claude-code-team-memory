@@ -443,7 +443,7 @@ if (has('commit') && file.trim() === current.trim()) {
   // nobody ever reads. Opt-in, because the manual path should not suddenly start pushing.
   if (has('push')) {
     const out = publish({
-      git, cwd: repo,
+      git, cwd: repo, base,
       // No request for the auto-applied path: it commits on the current branch precisely because a
       // confidence change carries no decision. Passing the command anyway would have it try to open a
       // request from main to main, and the "already on origin" branch of publish would report having
